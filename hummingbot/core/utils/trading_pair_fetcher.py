@@ -25,6 +25,7 @@ DOLOMITE_ENDPOINT = "https://exchange-api.dolomite.io/v1/markets"
 ETERBASE_ENDPOINT = "https://api.eterbase.exchange/api/markets"
 KRAKEN_ENDPOINT = "https://api.kraken.com/0/public/AssetPairs"
 CRYPTO_COM_ENDPOINT = "https://api.crypto.com/v2/public/get-ticker"
+BITRUE_ENDPOINT = "https://www.bitrue.com/api/v1/exchangeInfo"
 
 API_CALL_TIMEOUT = 5
 
@@ -323,6 +324,21 @@ class TradingPairFetcher:
 
         return []
 
+    @staticmethod
+    async def fetch_bitrue_trading_pairs() -> List[str]:
+        async with aiohttp.ClientSession() as client:
+            async with client.get(BITRUE_ENDPOINT, timeout=API_CALL_TIMEOUT) as response:
+                if response.status == 200:
+                    try:
+                        all_trading_pairs: List[Dict[str, any]] = await response.json()["symbols"]
+                        return [item["symbol"]
+                                for item in all_trading_pairs
+                                if item["status"] == "TRADING"]  # Only returns active trading pairs
+                    except Exception:
+                        pass
+                        # Do nothing if the request fails -- there will be no autocomplete available
+                return []
+
     async def fetch_all(self):
         tasks = [self.fetch_binance_trading_pairs(),
                  self.fetch_bamboo_relay_trading_pairs(),
@@ -335,7 +351,8 @@ class TradingPairFetcher:
                  self.fetch_kraken_trading_pairs(),
                  self.fetch_radar_relay_trading_pairs(),
                  self.fetch_eterbase_trading_pairs(),
-                 self.fetch_crypto_com_trading_pairs()]
+                 self.fetch_crypto_com_trading_pairs(),
+                 self.fetch_bitrue_trading_pairs()]
 
         # Radar Relay has not yet been migrated to a new version
         # Endpoint needs to be updated after migration
@@ -354,6 +371,7 @@ class TradingPairFetcher:
             "kraken": results[8],
             "radar_relay": results[9],
             "eterbase": results[10],
-            "crypto_com": results[11]
+            "crypto_com": results[11],
+            "bitrue": results[12],
         }
         self.ready = True

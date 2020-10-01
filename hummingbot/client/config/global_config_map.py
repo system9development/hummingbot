@@ -248,6 +248,16 @@ global_config_map = {
                   required_if=using_exchange("crypto_com"),
                   is_secure=True,
                   is_connect_key=True),
+    "bitrue_api_key":
+        ConfigVar(key="bitrue_api_key",
+                  prompt="Enter your Bitrue API key >>> ",
+                  required_if=using_exchange("bitrue"),
+                  is_secure=True),
+    "bitrue_secret_key":
+        ConfigVar(key="bitrue_secret_key",
+                  prompt="Enter your Bitrue secret key >>> ",
+                  required_if=using_exchange("bitrue"),
+                  is_secure=True),
     "celo_address":
         ConfigVar(key="celo_address",
                   prompt="Enter your Celo account address >>> ",

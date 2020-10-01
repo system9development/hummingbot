@@ -10,6 +10,7 @@ LIQUID_PRICE_URL = "https://api.liquid.com/products"
 BITTREX_PRICE_URL = "https://api.bittrex.com/api/v1.1/public/getmarketsummaries"
 KRAKEN_PRICE_URL = "https://api.kraken.com/0/public/Ticker?pair="
 COINBASE_PRO_PRICE_URL = "https://api.pro.coinbase.com/products/TO_BE_REPLACED/ticker"
+BITRUE_PRICE_URL = "https://www.bitrue.com/api/v1/ticker/bookTicker?symbol="
 
 
 def get_mid_price(exchange: str, trading_pair: str) -> Optional[Decimal]:
@@ -25,6 +26,8 @@ def get_mid_price(exchange: str, trading_pair: str) -> Optional[Decimal]:
         return kraken_mid_price(trading_pair)
     elif exchange == "coinbase_pro":
         return coinbase_pro_mid_price(trading_pair)
+    elif exchange == "bitrue":
+        return bitrue_mid_price(trading_pair)
     else:
         return binance_mid_price(trading_pair)
 
@@ -104,3 +107,13 @@ def coinbase_pro_mid_price(trading_pair: str) -> Optional[Decimal]:
     if "bid" in record and "ask" in record:
         result = (Decimal(record["bid"]) + Decimal(record["ask"])) / Decimal("2")
         return result
+
+
+@cachetools.func.ttl_cache(ttl=10)
+def bitrue_mid_price(trading_pair: str) -> Optional[Decimal]:
+    resp = requests.get(url=BITRUE_PRICE_URL + trading_pair)
+    record = resp.json()
+    result = None
+    if "bidPrice" in record and "askPrice" in record:
+        result = (Decimal(record["bidPrice"]) + Decimal(record["askPrice"])) / Decimal("2")
+    return result

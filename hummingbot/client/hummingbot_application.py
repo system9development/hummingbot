@@ -22,6 +22,8 @@ from hummingbot.connector.exchange.radar_relay.radar_relay_market import RadarRe
 from hummingbot.connector.exchange.bamboo_relay.bamboo_relay_market import BambooRelayMarket
 from hummingbot.connector.exchange.dolomite.dolomite_market import DolomiteMarket
 from hummingbot.connector.exchange.kraken.kraken_market import KrakenMarket
+from hummingbot.connector.exchange.crypto_com.crypto_com_exchange import CryptoComExchange
+from hummingbot.connector.exchange.bitrue.bitrue_market import BitrueMarket
 from hummingbot.model.sql_connection_manager import SQLConnectionManager
 
 from hummingbot.wallet.ethereum.ethereum_chain import EthereumChain
@@ -45,7 +47,7 @@ from hummingbot.connector.markets_recorder import MarketsRecorder
 from hummingbot.client.config.security import Security
 
 from hummingbot.connector.exchange_base import ExchangeBase
-from hummingbot.connector.exchange.crypto_com.crypto_com_exchange import CryptoComExchange
+
 from hummingbot.core.utils.trading_pair_fetcher import TradingPairFetcher
 
 s_logger = None
@@ -333,6 +335,13 @@ class HummingbotApplication(*commands):
                 market = CryptoComExchange(api_key, secret_key,
                                            trading_pairs=trading_pairs,
                                            trading_required=self._trading_required)
+            elif market_name == "bitrue":
+                bitrue_api_key = global_config_map.get("bitrue_api_key").value
+                bitrue_secret_key = global_config_map.get("bitrue_secret_key").value
+                market = BitrueMarket(bitrue_api_key,
+                                      bitrue_secret_key,
+                                      trading_pairs=trading_pairs,
+                                      trading_required=self._trading_required)
             else:
                 raise ValueError(f"Market name {market_name} is invalid.")
 
