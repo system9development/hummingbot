@@ -4,11 +4,9 @@ from typing import (
     List,
     Optional,
     Any,
-    AsyncIterable,
 )
 from decimal import Decimal
 import asyncio
-import aiohttp
 import math
 import time
 from async_timeout import timeout
@@ -47,15 +45,15 @@ ctce_logger = None
 s_decimal_NaN = Decimal("nan")
 
 
-class BitrueExchange(ExchangeBase):
+class BitrueMarket(ExchangeBase):
     """
-    BitrueExchange connects with Bitrue.com exchange and provides order book pricing, user account tracking and
+    BitrueMarket connects with Bitrue.com exchange and provides order book pricing, user account tracking and
     trading functionality.
     """
     API_CALL_TIMEOUT = 10.0
     SHORT_POLL_INTERVAL = 5.0
     UPDATE_ORDER_STATUS_MIN_INTERVAL = 10.0
-    LONG_POLL_INTERVAL = 120.0
+    LONG_POLL_INTERVAL = 10.0
 
     @classmethod
     def logger(cls) -> HummingbotLogger:
@@ -83,7 +81,6 @@ class BitrueExchange(ExchangeBase):
         self._user_stream_tracker = BitrueUserStreamTracker(self._bitrue_auth, trading_pairs)
 
         self._ev_loop = asyncio.get_event_loop()
-        self._shared_client = None
         self._poll_notifier = asyncio.Event()
 
         self._last_timestamp = 0
@@ -100,7 +97,7 @@ class BitrueExchange(ExchangeBase):
 
         self._real_time_balance_update = False
 
-        self.bitrue_client = BitrueAPIClient(bitrue_api_key, bitrue_api_secret)
+        self.bitrue_client = BitrueAPIClient(bitrue_api_key, bitrue_api_secret, coil_enabled=False)
 
     @property
     def name(self) -> str:
@@ -173,7 +170,7 @@ class BitrueExchange(ExchangeBase):
         :return a list of OrderType supported by this connector.
         Note that Market order type is no longer required and will not be used.
         """
-        return [OrderType.LIMIT, OrderType.LIMIT_MAKER, OrderType.MARKET]
+        return [OrderType.LIMIT, OrderType.MARKET]
 
     def start(self, clock: Clock, timestamp: float):
         """
@@ -234,30 +231,6 @@ class BitrueExchange(ExchangeBase):
         except Exception:
             return NetworkStatus.NOT_CONNECTED
         return NetworkStatus.CONNECTED
-
-    async def _api_request(self,
-                           method: str,
-                           path_url: str,
-                           params: Dict[str, Any] = {},
-                           is_auth_required: bool = False) -> Dict[str, Any]:
-        """
-        Sends an aiohttp request and waits for a response.
-        :param method: The HTTP method, e.g. get or post
-        :param path_url: The path url or the API end point
-        :param is_auth_required: Whether an authentication is required, when True the function will add encrypted
-        signature to the request.
-        :returns A response in json format.
-        """
-        pass
-        return None
-
-    async def _http_client(self) -> aiohttp.ClientSession:
-        """
-        :returns Shared client session instance
-        """
-        if self._shared_client is None:
-            self._shared_client = aiohttp.ClientSession()
-        return self._shared_client
 
     async def _trading_rules_polling_loop(self):
         """
@@ -367,7 +340,7 @@ class BitrueExchange(ExchangeBase):
         :param price: The price (note: this is no longer optional)
         :returns A new internal order id
         """
-        order_id: str = bitrue_utils.get_new_client_order_id(True, trading_pair)
+        order_id: str = bitrue_utils.get_new_client_order_id('BUY', trading_pair)
         safe_ensure_future(self._create_order(TradeType.BUY, order_id, trading_pair, amount, order_type, price))
         return order_id
 
@@ -382,7 +355,7 @@ class BitrueExchange(ExchangeBase):
         :param price: The price (note: this is no longer optional)
         :returns A new internal order id
         """
-        order_id: str = bitrue_utils.get_new_client_order_id(False, trading_pair)
+        order_id: str = bitrue_utils.get_new_client_order_id('SELL', trading_pair)
         safe_ensure_future(self._create_order(TradeType.SELL, order_id, trading_pair, amount, order_type, price))
         return order_id
 
@@ -412,24 +385,18 @@ class BitrueExchange(ExchangeBase):
         :param order_type: The order type
         :param price: The order price
         """
-        if not order_type.is_limit_type():
-            raise Exception(f"Unsupported order type: {order_type}")
+
         trading_rule = self._trading_rules[trading_pair]
 
         amount = self.quantize_order_amount(trading_pair, amount)
         price = self.quantize_order_price(trading_pair, price)
+
+        trade_type_exch = bitrue_utils.get_bitrue_trade_type(trade_type)
+        order_type_exch = bitrue_utils.get_bitrue_order_type(order_type)
         if amount < trading_rule.min_order_size:
             raise ValueError(f"Buy order amount {amount} is lower than the minimum order size "
                              f"{trading_rule.min_order_size}.")
-        api_params = {"instrument_name": bitrue_utils.convert_to_exchange_trading_pair(trading_pair),
-                      "side": trade_type.name,
-                      "type": "LIMIT",
-                      "price": f"{price:f}",
-                      "quantity": f"{amount:f}",
-                      "client_oid": order_id
-                      }
-        if order_type is OrderType.LIMIT_MAKER:
-            api_params["exec_inst"] = "POST_ONLY"
+
         self.start_tracking_order(order_id,
                                   None,
                                   trading_pair,
@@ -439,8 +406,14 @@ class BitrueExchange(ExchangeBase):
                                   order_type
                                   )
         try:
-            order_result = await self._api_request("post", "private/create-order", api_params, True)
-            exchange_order_id = str(order_result["result"]["order_id"])
+            order_result = self.bitrue_client.create_order(
+                symbol=trading_pair,
+                side=trade_type_exch,
+                type=order_type_exch,
+                quantity=amount,
+                price=price)
+
+            exchange_order_id = str(order_result["orderId"])
             tracked_order = self._in_flight_orders.get(order_id)
             if tracked_order is not None:
                 self.logger().info(f"Created {order_type.name} {trade_type.name} order {order_id} for "
@@ -516,14 +489,10 @@ class BitrueExchange(ExchangeBase):
             if tracked_order.exchange_order_id is None:
                 await tracked_order.get_exchange_order_id()
             ex_order_id = tracked_order.exchange_order_id
-            result = await self._api_request(
-                "post",
-                "private/cancel-order",
-                {"instrument_name": bitrue_utils.convert_to_exchange_trading_pair(trading_pair),
-                 "order_id": ex_order_id},
-                True
-            )
-            if result["code"] == 0:
+
+            result = self.bitrue_client.cancel_order(symbol=trading_pair, orderId=ex_order_id)
+
+            if result["orderId"] == ex_order_id:
                 if wait_for_status:
                     from hummingbot.core.utils.async_utils import wait_til
                     await wait_til(lambda: tracked_order.is_cancelled)
@@ -543,10 +512,13 @@ class BitrueExchange(ExchangeBase):
         Periodically update user balances and order status via REST API. This serves as a fallback measure for web
         socket API updates.
         """
+        print('_status_polling_loop')
         while True:
             try:
+                print('_status_polling_loop')
                 self._poll_notifier = asyncio.Event()
                 await self._poll_notifier.wait()
+                print('_status_polling_loop waited')
                 await safe_gather(
                     self._update_balances(),
                     self._update_order_status(),
@@ -593,34 +565,31 @@ class BitrueExchange(ExchangeBase):
 
         if current_tick > last_tick and len(self._in_flight_orders) > 0:
             tracked_orders = list(self._in_flight_orders.values())
-            tasks = []
+            tasks = list()
+            exch_orders = list()
             for tracked_order in tracked_orders:
-                order_id = await tracked_order.get_exchange_order_id()
-                tasks.append(self._api_request("post",
-                                               "private/get-order-detail",
-                                               {"order_id": order_id},
-                                               True))
-
-                tasks.append(self.bitrue_client.get_order(symbol=tracked_order.trading_pair, orderId=order_id, timestamp=time.time()))
+                order_id: str = tracked_order.get_exchange_order_id()
+                exch_order: Dict[str, any] = self.bitrue_client.get_order(symbol=tracked_order.trading_pair, orderId=order_id)
+                # Bitrue API does not support client order IDs, insert it manually.
+                exch_order['client_order_id'] = tracked_order.get_client_order_id()
+                exch_orders.append(exch_order)
 
             self.logger().debug(f"Polling for order status updates of {len(tasks)} orders.")
-            update_results = await safe_gather(*tasks, return_exceptions=True)
-            for update_result in update_results:
-                if isinstance(update_result, Exception):
-                    raise update_result
-                if "result" not in update_result:
-                    self.logger().info(f"_update_order_status result not in resp: {update_result}")
+            # update_results = await safe_gather(*tasks, return_exceptions=True)
+            for exch_order in exch_orders:
+                if isinstance(exch_order, Exception):
+                    raise exch_order
+                if "orderId" not in exch_order:
+                    self.logger().info(f"orderId result not in resp: {exch_order}")
                     continue
-                for trade_msg in update_result["result"]["trade_list"]:
-                    await self._process_trade_message(trade_msg)
-                self._process_order_message(update_result["result"]["order_info"])
+                self._process_order_message(exch_order)
 
     def _process_order_message(self, order_msg: Dict[str, Any]):
         """
         Updates in-flight order and triggers cancellation or failure event if needed.
         :param order_msg: The order response from either REST or web socket API (they are of the same format)
         """
-        client_order_id = order_msg["client_oid"]
+        client_order_id = order_msg["client_order_id"]
         if client_order_id not in self._in_flight_orders:
             return
         tracked_order = self._in_flight_orders[client_order_id]
@@ -729,16 +698,27 @@ class BitrueExchange(ExchangeBase):
         Is called automatically by the clock for each clock's tick (1 second by default).
         It checks if status polling task is due for execution.
         """
+
         now = time.time()
         poll_interval = (self.SHORT_POLL_INTERVAL
                          if now - self._user_stream_tracker.last_recv_time > 60.0
                          else self.LONG_POLL_INTERVAL)
         last_tick = self._last_timestamp / poll_interval
         current_tick = timestamp / poll_interval
+
         if current_tick > last_tick:
+            print('tick', 'current_tick > last_tick')
             if not self._poll_notifier.is_set():
+                print('tick set nf')
                 self._poll_notifier.set()
         self._last_timestamp = timestamp
+
+    async def test_ticker(self):
+        ''' Temporary function for connector testing '''
+        while True:
+            self.tick(time.time())
+            print('test_ticker, account_balances', self._account_balances)
+            await asyncio.sleep(2)
 
     def get_fee(self,
                 base_currency: str,
@@ -754,45 +734,3 @@ class BitrueExchange(ExchangeBase):
         """
         is_maker = order_type is OrderType.LIMIT_MAKER
         return TradeFee(percent=self.estimate_fee_pct(is_maker))
-
-    async def _iter_user_event_queue(self) -> AsyncIterable[Dict[str, any]]:
-        while True:
-            try:
-                yield await self._user_stream_tracker.user_stream.get()
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                self.logger().network(
-                    "Unknown error. Retrying after 1 seconds.",
-                    exc_info=True,
-                    app_warning_msg="Could not fetch user events from Bitrue. Check API key and network connection."
-                )
-                await asyncio.sleep(1.0)
-
-    async def _user_stream_event_listener(self):
-        """
-        Listens to message in _user_stream_tracker.user_stream queue. The messages are put in by
-        BitrueAPIUserStreamDataSource.
-        """
-        async for event_message in self._iter_user_event_queue():
-            try:
-                if "result" not in event_message or "channel" not in event_message["result"]:
-                    continue
-                channel = event_message["result"]["channel"]
-                if "user.trade" in channel:
-                    for trade_msg in event_message["result"]["data"]:
-                        await self._process_trade_message(trade_msg)
-                elif "user.order" in channel:
-                    for order_msg in event_message["result"]["data"]:
-                        self._process_order_message(order_msg)
-                elif channel == "user.balance":
-                    balances = event_message["result"]["data"]
-                    for balance_entry in balances:
-                        asset_name = balance_entry["currency"]
-                        self._account_balances[asset_name] = Decimal(str(balance_entry["balance"]))
-                        self._account_available_balances[asset_name] = Decimal(str(balance_entry["available"]))
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                self.logger().error("Unexpected error in user stream listener loop.", exc_info=True)
-                await asyncio.sleep(5.0)

@@ -37,7 +37,7 @@ class BitrueAPIOrderBookDataSource(OrderBookTrackerDataSource):
         self._snapshot_msg: Dict[str, any] = {}
 
         # Bitrue REST API client
-        self.bitrue_client: BitrueAPIClient = BitrueAPIClient('', '')
+        self.bitrue_client: BitrueAPIClient = BitrueAPIClient('', '', coil_enabled=False)
 
         # This param is used to filter new trades from API response as Bitrue does not support incremental trades updates
         self.last_max_trade_id: Dict[str, int] = {trading_pair: 0 for trading_pair in trading_pairs}
@@ -89,6 +89,7 @@ class BitrueAPIOrderBookDataSource(OrderBookTrackerDataSource):
         Fetches orderbook snapshots
         """
         while True:
+            print('listen_for_order_book_diffs')
             try:
                 for trading_pair in self._trading_pairs:
                     try:
@@ -159,6 +160,7 @@ class BitrueAPIOrderBookDataSource(OrderBookTrackerDataSource):
     async def listen_for_trades(self, ev_loop: asyncio.BaseEventLoop, output: asyncio.Queue):
 
         while True:
+            print('listen_for_trades')
             try:
                 for trading_pair in self._trading_pairs:
                     trades: List[Dict[str, any]] = await self.get_recent_trades(trading_pair)
