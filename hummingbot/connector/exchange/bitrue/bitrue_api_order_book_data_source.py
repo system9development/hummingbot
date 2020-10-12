@@ -41,7 +41,10 @@ class BitrueAPIOrderBookDataSource(OrderBookTrackerDataSource):
         self.bitrue_client: BitrueAPIClient = BitrueAPIClient('', '')
 
         # This param is used to filter new trades from API response as Bitrue does not support incremental trades updates
-        self.last_max_trade_id: Dict[str, int] = {trading_pair: 0 for trading_pair in trading_pairs}
+        if trading_pairs:
+            self.last_max_trade_id: Dict[str, int] = {trading_pair: 0 for trading_pair in trading_pairs}
+        else:
+            self.last_max_trade_id: Dict[str, int] = None
 
     async def get_last_traded_prices(self, trading_pairs: List[str]) -> Dict[str, float]:
         tasks = [self.get_last_traded_price(t_pair) for t_pair in trading_pairs]

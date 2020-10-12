@@ -326,13 +326,14 @@ class TradingPairFetcher:
 
     @staticmethod
     async def fetch_bitrue_trading_pairs() -> List[str]:
+        from hummingbot.connector.exchange.bitrue.bitrue_utils import convert_from_exchange_trading_pair
         async with aiohttp.ClientSession() as client:
             async with client.get(BITRUE_ENDPOINT, timeout=API_CALL_TIMEOUT) as response:
                 if response.status == 200:
                     try:
                         exch_info: Dict[str, any] = await response.json()
                         all_trading_pairs: List[Dict[str, any]] = exch_info["symbols"]
-                        return [item["symbol"]
+                        return [convert_from_exchange_trading_pair(item["symbol"])
                                 for item in all_trading_pairs
                                 if item["status"] == "TRADING"]  # Only returns active trading pairs
                     except Exception:
