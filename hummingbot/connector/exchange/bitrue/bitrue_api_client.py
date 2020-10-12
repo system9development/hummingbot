@@ -3,6 +3,7 @@ from typing import (
     Dict,
     Any,
 )
+from decimal import Decimal
 
 import hashlib
 import hmac
@@ -12,11 +13,11 @@ import json
 import aiohttp
 
 
-class BitrueAPI:
+class BitrueAPIClient:
 
     REST_API_URL = "https://www.bitrue.com/api/v1"
 
-    def __init__(self, api_key = None, api_secret = ''):
+    def __init__(self, api_key = '', api_secret = ''):
         self.api_key: str = api_key
         self.api_secret: str = api_secret
         self._shared_client: aiohttp.ClientSession = None
@@ -32,7 +33,7 @@ class BitrueAPI:
     async def api_request(self,
                           method: str,
                           path_url: str,
-                          params: Dict[str, Any] = {},
+                          params: Dict[str, Any] = None,
                           is_auth_required: bool = False) -> Dict[str, Any]:
         """
         Sends an aiohttp request and waits for a response.
@@ -45,14 +46,15 @@ class BitrueAPI:
         """
         url = f"{self.REST_API_URL}{path_url}"
 
-        if len(params) > 0:
-            if "timestamp" not in params:
-                params['timestamp'] = int(time.time() * 1000)
-            params_sorted = sorted([(k, v) for (k, v) in params.items()])
-            query_string = '&'.join(["{}={}".format(d[0], d[1]) for d in params_sorted])
-            query_url = f"{url}?{query_string}"
-        else:
-            query_url = url
+        if params is None:
+            params = {}
+
+        if "timestamp" not in params:
+            params['timestamp'] = int(time.time() * 1000)
+
+        params_sorted = sorted([(k, v) for (k, v) in params.items()])
+        query_string = '&'.join(["{}={}".format(d[0], d[1]) for d in params_sorted])
+        query_url = f"{url}?{query_string}"
 
         if is_auth_required:
             signature = self._generate_signature(params)
@@ -63,7 +65,6 @@ class BitrueAPI:
         else:
             headers = {"Content-Type": "application/json"}
 
-        print(query_url)
         client = await self._http_client()
         if method == "get":
             response = await client.get(query_url, headers=headers)
@@ -75,14 +76,14 @@ class BitrueAPI:
             raise NotImplementedError
 
         try:
-            parsed_response = json.loads(await response.text())
+            response_text = await response.text()
+            parsed_response = json.loads(response_text)
         except Exception as e:
             raise IOError(f"Error parsing data from {url}. Error: {str(e)}")
         if response.status != 200:
             raise IOError(f"Error fetching data from {url}. HTTP status is {response.status}. "
                           f"Message: {parsed_response}")
-        # print(f"REQUEST: {method} {path_url} {params}")
-        # print(f"RESPONSE: {parsed_response}")
+
         return parsed_response
         return None
 
@@ -95,3 +96,60 @@ class BitrueAPI:
             hashlib.sha256).hexdigest()
 
         return signature
+
+    async def get_ticker_price(self, symbol: str):
+        params = {"symbol": symbol}
+        api_response = await self.api_request("get", "/ticker/price", params=params)
+        return api_response
+
+    async def get_order_book(self, symbol: str, limit: int = 1000):
+        params = {"symbol": symbol, "limit": limit}
+        api_response = await self.api_request("get", "/depth", params=params)
+        return api_response
+
+    async def get_recent_trades(self, symbol: str, limit: int = 1000):
+        params = {"symbol": symbol, "limit": limit}
+        api_response = await self.api_request("get", "/trades", params=params)
+        return api_response
+
+    async def ping(self):
+        api_response = await self.api_request("get", "/ping")
+        return api_response
+
+    async def get_exchange_info(self):
+        api_response = await self.api_request("get", "/exchangeInfo")
+        return api_response
+
+    async def create_order(self, client_order_id: str, symbol: str, side: str, type: str, quantity: Decimal, price: Decimal):
+        params = {
+            'newClientOrderId': client_order_id,
+            'symbol': symbol,
+            'side': side,
+            'type': type,
+            'quantity': quantity,
+            'price': price}
+        api_response = await self.api_request("post", "/order", params=params, is_auth_required=True)
+        return api_response
+
+    async def get_order(self, symbol: str, order_id: str):
+        params = {
+            'orderId': order_id,
+            'symbol': symbol}
+        api_response = await self.api_request("get", "/order", params=params, is_auth_required=True)
+        return api_response
+
+    async def cancel_order(self, symbol: str, order_id: str):
+        params = {
+            'orderId': order_id,
+            'symbol': symbol}
+        api_response = await self.api_request("delete", "/order", params=params, is_auth_required=True)
+        return api_response
+
+    async def get_account(self):
+        api_response = await self.api_request("get", "/account", is_auth_required=True)
+        return api_response
+
+    async def get_my_trades(self, symbol: str, limit: int = 1000):
+        params = {'symbol': symbol, 'limit': limit}
+        api_response = await self.api_request("get", "/myTrades", params=params, is_auth_required=True)
+        return api_response
