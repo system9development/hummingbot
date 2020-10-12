@@ -21,7 +21,8 @@ class BitrueAPIUserStreamDataSource(UserStreamTrackerDataSource):
     def __init__(self, bitrue_auth: BitrueAuth, trading_pairs: Optional[List[str]] = []):
         self._bitrue_auth: BitrueAuth = bitrue_auth
         self._trading_pairs = trading_pairs
-        self._last_recv_time: float = 0
+        # Bitrue exchange doesn't have a Websocket API. Set it ready immidiately.
+        self._last_recv_time: float = 1
         super().__init__()
 
     @property

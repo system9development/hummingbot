@@ -12,8 +12,9 @@ from hummingbot.core.utils.async_utils import safe_gather
 from hummingbot.logger import HummingbotLogger
 
 from hummingbot.connector.exchange.bitrue.bitrue_order_book import BitrueOrderBook
+from hummingbot.connector.exchange.bitrue.bitrue_api_client import BitrueAPIClient
 
-from bitrue.client import Client as BitrueAPIClient
+from hummingbot.connector.exchange.bitrue import bitrue_utils
 
 
 class BitrueAPIOrderBookDataSource(OrderBookTrackerDataSource):
@@ -37,7 +38,7 @@ class BitrueAPIOrderBookDataSource(OrderBookTrackerDataSource):
         self._snapshot_msg: Dict[str, any] = {}
 
         # Bitrue REST API client
-        self.bitrue_client: BitrueAPIClient = BitrueAPIClient('', '', coil_enabled=False)
+        self.bitrue_client: BitrueAPIClient = BitrueAPIClient('', '')
 
         # This param is used to filter new trades from API response as Bitrue does not support incremental trades updates
         self.last_max_trade_id: Dict[str, int] = {trading_pair: 0 for trading_pair in trading_pairs}
@@ -49,14 +50,15 @@ class BitrueAPIOrderBookDataSource(OrderBookTrackerDataSource):
 
     async def get_last_traded_price(self, trading_pair: str) -> float:
         # Expected output from client request: {'symbol': 'ETHBTC', 'price': '0.033342'}
-        api_response = self.bitrue_client.get_ticker_price(trading_pair)
+        api_response = await self.bitrue_client.get_ticker_price(bitrue_utils.convert_to_exchange_trading_pair(trading_pair))
         return float(api_response['price'])
 
     async def get_snapshot(self, trading_pair: str) -> Dict[str, any]:
         """
         Get whole orderbook
         """
-        order_book = self.bitrue_client.get_order_book(symbol=trading_pair, limit=1000)
+
+        order_book = await self.bitrue_client.get_order_book(symbol=bitrue_utils.convert_to_exchange_trading_pair(trading_pair), limit=1000)
         # Expected output
         # {'lastUpdateId': 1601302979911, 'bids': [['0.033366', '0.74', []], ['0.033365', '9.461', []]], 'asks': [['0.033369', '1.295', []], ['0.033370', '9.36', []]]}
 
@@ -66,7 +68,8 @@ class BitrueAPIOrderBookDataSource(OrderBookTrackerDataSource):
         """
         Get recent trades from REST API
         """
-        recent_trades = self.bitrue_client.get_recent_trades(symbol=trading_pair, limit=1000)
+
+        recent_trades = await self.bitrue_client.get_recent_trades(symbol=bitrue_utils.convert_to_exchange_trading_pair(trading_pair), limit=1000)
         # Expected response
         # [{'id': 54866489, 'price': '0.0331220000000000', 'qty': '3.9570000000000000', 'time': 1601385563186, 'isBuyerMaker': True, 'isBestMatch': True}, {'id': 54866488, 'price': '0.0331220000000000', 'qty': '3.4310000000000000', 'time': 1601385563020, 'isBuyerMaker': True, 'isBestMatch': True}]
 
@@ -89,7 +92,6 @@ class BitrueAPIOrderBookDataSource(OrderBookTrackerDataSource):
         Fetches orderbook snapshots
         """
         while True:
-            print('listen_for_order_book_diffs')
             try:
                 for trading_pair in self._trading_pairs:
                     try:
@@ -106,11 +108,11 @@ class BitrueAPIOrderBookDataSource(OrderBookTrackerDataSource):
                         await asyncio.sleep(self.ORDER_BOOK_DIFF_TIMEOUT)
                     except asyncio.CancelledError:
                         raise
-                    except Exception:
+                    except Exception as e:
                         self.logger().network(
                             "Unexpected error.",
                             exc_info=True,
-                            app_warning_msg="Unexpected error with REST API request..."
+                            app_warning_msg=f"Unexpected error with REST API request: {e}"
                         )
                         await asyncio.sleep(self.ERROR_TIMEOUT)
 
@@ -160,7 +162,6 @@ class BitrueAPIOrderBookDataSource(OrderBookTrackerDataSource):
     async def listen_for_trades(self, ev_loop: asyncio.BaseEventLoop, output: asyncio.Queue):
 
         while True:
-            print('listen_for_trades')
             try:
                 for trading_pair in self._trading_pairs:
                     trades: List[Dict[str, any]] = await self.get_recent_trades(trading_pair)
