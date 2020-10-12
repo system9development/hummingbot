@@ -63,7 +63,7 @@ EXAMPLE_PAIRS = {
     "eterbase": "ETH-EUR",
     "kraken": "ETH-USDC",
     "crypto_com": "ETH-USDT",
-    "bitrue": "ETH-BTC"
+    "bitrue": "XRP-USDT"
 }
 
 EXAMPLE_ASSETS = {
@@ -79,7 +79,7 @@ EXAMPLE_ASSETS = {
     "eterbase": "ETH",
     "kraken": "XETH",
     "crypto_com": "ETH",
-    "bitrue": "ETH"
+    "bitrue": "XRP"
 }
 
 MAXIMUM_OUTPUT_PANE_LINE_COUNT = 1000

@@ -330,7 +330,8 @@ class TradingPairFetcher:
             async with client.get(BITRUE_ENDPOINT, timeout=API_CALL_TIMEOUT) as response:
                 if response.status == 200:
                     try:
-                        all_trading_pairs: List[Dict[str, any]] = await response.json()["symbols"]
+                        exch_info: Dict[str, any] = await response.json()
+                        all_trading_pairs: List[Dict[str, any]] = exch_info["symbols"]
                         return [item["symbol"]
                                 for item in all_trading_pairs
                                 if item["status"] == "TRADING"]  # Only returns active trading pairs
