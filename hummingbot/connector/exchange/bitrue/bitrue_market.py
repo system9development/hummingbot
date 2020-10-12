@@ -10,6 +10,7 @@ from decimal import Decimal
 import asyncio
 import math
 import time
+import copy
 from async_timeout import timeout
 
 from hummingbot.core.network_iterator import NetworkStatus
@@ -432,14 +433,6 @@ class BitrueMarket(ExchangeBase):
             raise ValueError(f"Buy order amount {amount} is lower than the minimum order size "
                              f"{trading_rule.min_order_size}.")
 
-        self.start_tracking_order(order_id,
-                                  None,
-                                  trading_pair,
-                                  trade_type,
-                                  price,
-                                  amount,
-                                  order_type
-                                  )
         try:
             order_result = await self.bitrue_client.create_order(
                 client_order_id=order_id,
@@ -449,11 +442,17 @@ class BitrueMarket(ExchangeBase):
                 quantity=amount,
                 price=price)
             exchange_order_id = str(order_result["orderId"])
-            tracked_order = self._in_flight_orders.get(order_id)
-            if tracked_order is not None:
-                self.logger().info(f"Created {order_type.name} {trade_type.name} order {order_id} for "
-                                   f"{amount} {trading_pair}.")
-                tracked_order.exchange_order_id = exchange_order_id
+            self.start_tracking_order(order_id,
+                                      exchange_order_id,
+                                      trading_pair,
+                                      trade_type,
+                                      price,
+                                      amount,
+                                      order_type
+                                      )
+
+            self.logger().info(f"Created {order_type.name} {trade_type.name} order {order_id} for "
+                               f"{amount} {trading_pair}.")
 
             event_tag = MarketEvent.BuyOrderCreated if trade_type is TradeType.BUY else MarketEvent.SellOrderCreated
             event_class = BuyOrderCreatedEvent if trade_type is TradeType.BUY else SellOrderCreatedEvent
@@ -581,7 +580,6 @@ class BitrueMarket(ExchangeBase):
         """
         local_asset_names = set(self._account_balances.keys())
         remote_asset_names = set()
-
         account_info = await self.bitrue_client.get_account()
         balances = account_info["balances"]
         for balance_entry in balances:
@@ -596,6 +594,10 @@ class BitrueMarket(ExchangeBase):
         for asset_name in asset_names_to_remove:
             del self._account_available_balances[asset_name]
             del self._account_balances[asset_name]
+
+        # Take inflight orders snapshot
+        self._in_flight_orders_snapshot = {k: copy.copy(v) for k, v in self._in_flight_orders.items()}
+        self._in_flight_orders_snapshot_timestamp = self._current_timestamp
 
     async def _update_order_status(self):
         """
@@ -635,7 +637,7 @@ class BitrueMarket(ExchangeBase):
         current_tick = self.current_timestamp / self.UPDATE_TRADES_MIN_INTERVAL
 
         if current_tick > last_tick and len(self._in_flight_orders) > 0:
-            # Composer Client to Exchange order_id map as Bitrue exchange does not support client order ids.
+            # Compose Client to Exchange order_id map as Bitrue exchange does not support client order ids.
             tracked_orders = list(self._in_flight_orders.values())
             exch_orders_map = dict()
             for tracked_order in tracked_orders:
@@ -728,7 +730,7 @@ class BitrueMarket(ExchangeBase):
         event if the total executed amount equals to the specified order amount.
         """
 
-        track_order = [o for o in self._in_flight_orders.values() if trade_msg["orderId"] == o.exchange_order_id]
+        track_order = [o for o in self._in_flight_orders.values() if str(trade_msg["orderId"]) == o.exchange_order_id]
         if not track_order:
             return
         tracked_order = track_order[0]
