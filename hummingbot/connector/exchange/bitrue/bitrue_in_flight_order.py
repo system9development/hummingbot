@@ -72,21 +72,23 @@ class BitrueInFlightOrder(InFlightOrderBase):
 
     def update_with_trade_update(self, trade_update: Dict[str, Any]) -> bool:
         """
-        Updates the in flight order with trade update (from private/get-order-detail end point)
+        Updates the in flight order with trade update (from /myTrades end point)
         return: True if the order gets updated otherwise False
         """
-        trade_id = trade_update["trade_id"]
+
+        trade_id = trade_update["id"]
         # trade_update["orderId"] is type int
-        if str(trade_update["order_id"]) != self.exchange_order_id or trade_id in self.trade_id_set:
+        if str(trade_update["orderId"]) != self.exchange_order_id or trade_id in self.trade_id_set:
             # trade already recorded
             return False
         self.trade_id_set.add(trade_id)
-        self.executed_amount_base += Decimal(str(trade_update["traded_quantity"]))
-        self.fee_paid += Decimal(str(trade_update["fee"]))
-        self.executed_amount_quote += (Decimal(str(trade_update["traded_price"])) *
-                                       Decimal(str(trade_update["traded_quantity"])))
-        if not self.fee_asset:
-            self.fee_asset = trade_update["fee_currency"]
+
+        # Do not process filled orders
+        if self.last_state != 'FILLED':
+            self.executed_amount_base += Decimal(str(trade_update["qty"]))
+            self.executed_amount_quote += (Decimal(str(trade_update["price"])) *
+                                           Decimal(str(trade_update["qty"])))
+
         return True
 
     def get_exchange_order_id(self):

@@ -4,6 +4,7 @@ from typing import (
     List,
     Optional,
     Any,
+    # AsyncIterable
 )
 from decimal import Decimal
 import asyncio
@@ -38,10 +39,8 @@ from hummingbot.connector.exchange.bitrue.bitrue_user_stream_tracker import Bitr
 from hummingbot.connector.exchange.bitrue.bitrue_auth import BitrueAuth
 from hummingbot.connector.exchange.bitrue.bitrue_in_flight_order import BitrueInFlightOrder
 from hummingbot.connector.exchange.bitrue import bitrue_utils
+from hummingbot.connector.exchange.bitrue.bitrue_api_client import BitrueAPIClient
 
-from bitrue.client import Client as BitrueAPIClient
-
-ctce_logger = None
 s_decimal_NaN = Decimal("nan")
 
 
@@ -51,16 +50,19 @@ class BitrueMarket(ExchangeBase):
     trading functionality.
     """
     API_CALL_TIMEOUT = 10.0
-    SHORT_POLL_INTERVAL = 5.0
-    UPDATE_ORDER_STATUS_MIN_INTERVAL = 10.0
-    LONG_POLL_INTERVAL = 10.0
+    SHORT_POLL_INTERVAL = 3.0
+    UPDATE_ORDER_STATUS_MIN_INTERVAL = 3.0
+    UPDATE_TRADES_MIN_INTERVAL = 3.0
+    LONG_POLL_INTERVAL = 5.0
+    ERROR_TIMEOUT = 5.0
+
+    _logger: Optional[HummingbotLogger] = None
 
     @classmethod
     def logger(cls) -> HummingbotLogger:
-        global ctce_logger
-        if ctce_logger is None:
-            ctce_logger = logging.getLogger(__name__)
-        return ctce_logger
+        if cls._logger is None:
+            cls._logger = logging.getLogger(__name__)
+        return cls._logger
 
     def __init__(self,
                  bitrue_api_key: str,
@@ -77,6 +79,7 @@ class BitrueMarket(ExchangeBase):
         super().__init__()
         self._trading_required = trading_required
         self._bitrue_auth = BitrueAuth(bitrue_api_key, bitrue_api_secret)
+        self._trading_pairs = trading_pairs
         self._order_book_tracker = BitrueOrderBookTracker(trading_pairs=trading_pairs)
         self._user_stream_tracker = BitrueUserStreamTracker(self._bitrue_auth, trading_pairs)
 
@@ -85,6 +88,7 @@ class BitrueMarket(ExchangeBase):
 
         self._last_timestamp = 0
         self._last_poll_timestamp = 0
+        self._current_timestamp = 0
 
         self._in_flight_orders = {}  # Dict[client_order_id:str, BitrueInFlightOrder]
         self._order_not_found_records = {}  # Dict[client_order_id:str, count:int]
@@ -93,15 +97,22 @@ class BitrueMarket(ExchangeBase):
         self._status_polling_task = None
         self._user_stream_event_listener_task = None
         self._trading_rules_polling_task = None
+        self._max_trade_ids_task = None
         self._last_poll_timestamp = 0
 
         self._real_time_balance_update = False
 
-        self.bitrue_client = BitrueAPIClient(bitrue_api_key, bitrue_api_secret, coil_enabled=False)
+        self.last_max_trade_id: Dict[str, int] = {}
+
+        self.bitrue_client = BitrueAPIClient(bitrue_api_key, bitrue_api_secret)
 
     @property
     def name(self) -> str:
         return "bitrue"
+
+    @property
+    def current_timestamp(self) -> float:
+        return self._current_timestamp
 
     @property
     def order_books(self) -> Dict[str, OrderBook]:
@@ -126,6 +137,7 @@ class BitrueMarket(ExchangeBase):
             "trading_rule_initialized": len(self._trading_rules) > 0,
             "user_stream_initialized":
                 self._user_stream_tracker.data_source.last_recv_time > 0 if self._trading_required else True,
+            "max_trade_ids_initialized": len(self.last_max_trade_id) > 0
         }
 
     @property
@@ -196,6 +208,7 @@ class BitrueMarket(ExchangeBase):
             self._status_polling_task = safe_ensure_future(self._status_polling_loop())
             self._user_stream_tracker_task = safe_ensure_future(self._user_stream_tracker.start())
             self._user_stream_event_listener_task = safe_ensure_future(self._user_stream_event_listener())
+            self._max_trade_ids_task = safe_ensure_future(self._update_max_trade_ids())
 
     async def stop_network(self):
         """
@@ -224,13 +237,35 @@ class BitrueMarket(ExchangeBase):
         the network connection. Simply ping the network (or call any light weight public API).
         """
         try:
-            # since there is no ping endpoint, the lowest rate call is to get BTC-USDT ticker
-            self.bitrue_client.ping()
+            await self.bitrue_client.ping()
         except asyncio.CancelledError:
             raise
         except Exception:
             return NetworkStatus.NOT_CONNECTED
         return NetworkStatus.CONNECTED
+
+    async def _update_max_trade_ids(self):
+        """
+        Initialize self.last_max_trade_id dict in order to track new trades using REST API, as Bitrue.com exchange does not have Websocket API.
+        """
+        if len(self.last_max_trade_id) == 0:
+            try:
+                for trading_pair in self._trading_pairs:
+                    self.last_max_trade_id[trading_pair] = 0
+                    trades: List[Dict[str, any]] = await self.bitrue_client.get_my_trades(symbol=bitrue_utils.convert_to_exchange_trading_pair(trading_pair), limit=2)
+                    max_trade_id = 0
+                    for trade in trades[::-1]:
+                        # Process only trades that haven't been seen before
+                        if trade['id'] > self.last_max_trade_id[trading_pair]:
+                            # Update last_max_trade_id
+                            max_trade_id = max(max_trade_id, trade['id'])
+                    self.last_max_trade_id[trading_pair] = max(max_trade_id, self.last_max_trade_id[trading_pair])
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                self.logger().error("Unexpected error with REST API request...",
+                                    exc_info=True)
+                await asyncio.sleep(self.ERROR_TIMEOUT)
 
     async def _trading_rules_polling_loop(self):
         """
@@ -250,7 +285,7 @@ class BitrueMarket(ExchangeBase):
                 await asyncio.sleep(0.5)
 
     async def _update_trading_rules(self):
-        instruments_info = self.bitrue_client.get_exchange_info()
+        instruments_info = await self.bitrue_client.get_exchange_info()
         self._trading_rules.clear()
         self._trading_rules = self._format_trading_rules(instruments_info)
 
@@ -281,7 +316,7 @@ class BitrueMarket(ExchangeBase):
         result = {}
         for rule in instruments_info["symbols"]:
             try:
-                trading_pair = rule['symbol']
+                trading_pair = bitrue_utils.convert_from_exchange_trading_pair(rule['symbol'])
 
                 for _filter in rule['filters']:
                     if _filter['filterType'] == 'PRICE_FILTER':
@@ -406,13 +441,13 @@ class BitrueMarket(ExchangeBase):
                                   order_type
                                   )
         try:
-            order_result = self.bitrue_client.create_order(
-                symbol=trading_pair,
+            order_result = await self.bitrue_client.create_order(
+                client_order_id=order_id,
+                symbol=bitrue_utils.convert_to_exchange_trading_pair(trading_pair),
                 side=trade_type_exch,
                 type=order_type_exch,
                 quantity=amount,
                 price=price)
-
             exchange_order_id = str(order_result["orderId"])
             tracked_order = self._in_flight_orders.get(order_id)
             if tracked_order is not None:
@@ -490,13 +525,21 @@ class BitrueMarket(ExchangeBase):
                 await tracked_order.get_exchange_order_id()
             ex_order_id = tracked_order.exchange_order_id
 
-            result = self.bitrue_client.cancel_order(symbol=trading_pair, orderId=ex_order_id)
+            result = await self.bitrue_client.cancel_order(symbol=bitrue_utils.convert_to_exchange_trading_pair(trading_pair), order_id=ex_order_id)
+            if isinstance(result, dict) and str(result.get("orderId")) == ex_order_id:
+                self.logger().info(f"Successfully cancelled order {order_id}.")
+                self.trigger_event(
+                    MarketEvent.OrderCancelled,
+                    OrderCancelledEvent(
+                        self.current_timestamp,
+                        order_id))
 
-            if result["orderId"] == ex_order_id:
                 if wait_for_status:
                     from hummingbot.core.utils.async_utils import wait_til
                     await wait_til(lambda: tracked_order.is_cancelled)
+                self.stop_tracking_order(order_id)
                 return order_id
+
         except asyncio.CancelledError:
             raise
         except Exception as e:
@@ -512,18 +555,16 @@ class BitrueMarket(ExchangeBase):
         Periodically update user balances and order status via REST API. This serves as a fallback measure for web
         socket API updates.
         """
-        print('_status_polling_loop')
         while True:
             try:
-                print('_status_polling_loop')
                 self._poll_notifier = asyncio.Event()
                 await self._poll_notifier.wait()
-                print('_status_polling_loop waited')
                 await safe_gather(
                     self._update_balances(),
                     self._update_order_status(),
+                    self._update_trades()
                 )
-                self._last_poll_timestamp = self.current_timestamp
+                self._last_poll_timestamp = self._current_timestamp
             except asyncio.CancelledError:
                 raise
             except Exception as e:
@@ -541,10 +582,10 @@ class BitrueMarket(ExchangeBase):
         local_asset_names = set(self._account_balances.keys())
         remote_asset_names = set()
 
-        account_info = self.bitrue_client.get_account()
+        account_info = await self.bitrue_client.get_account()
         balances = account_info["balances"]
         for balance_entry in balances:
-            asset_name = balance_entry["asset"]
+            asset_name = balance_entry["asset"].upper()
             free_balance = Decimal(balance_entry["free"])
             total_balance = Decimal(balance_entry["free"]) + Decimal(balance_entry["locked"])
             self._account_available_balances[asset_name] = free_balance
@@ -566,23 +607,69 @@ class BitrueMarket(ExchangeBase):
         if current_tick > last_tick and len(self._in_flight_orders) > 0:
             tracked_orders = list(self._in_flight_orders.values())
             tasks = list()
-            exch_orders = list()
+            exch_orders_map = dict()
             for tracked_order in tracked_orders:
+
                 order_id: str = tracked_order.get_exchange_order_id()
-                exch_order: Dict[str, any] = self.bitrue_client.get_order(symbol=tracked_order.trading_pair, orderId=order_id)
-                # Bitrue API does not support client order IDs, insert it manually.
-                exch_order['client_order_id'] = tracked_order.get_client_order_id()
-                exch_orders.append(exch_order)
+                tasks.append(self.bitrue_client.get_order(symbol=bitrue_utils.convert_to_exchange_trading_pair(tracked_order.trading_pair), order_id=order_id))
+                # Bitrue API does not support client order IDs, we should track them manually.
+                exch_orders_map[order_id] = tracked_order.get_client_order_id()
 
             self.logger().debug(f"Polling for order status updates of {len(tasks)} orders.")
-            # update_results = await safe_gather(*tasks, return_exceptions=True)
+            exch_orders = await safe_gather(*tasks, return_exceptions=True)
+
             for exch_order in exch_orders:
                 if isinstance(exch_order, Exception):
                     raise exch_order
                 if "orderId" not in exch_order:
                     self.logger().info(f"orderId result not in resp: {exch_order}")
                     continue
+                exch_order['client_order_id'] = exch_orders_map[exch_order['orderId']]
                 self._process_order_message(exch_order)
+
+    async def _update_trades(self):
+        """
+        Calls REST API to fetch recent trades.
+        """
+        last_tick = self._last_poll_timestamp / self.UPDATE_TRADES_MIN_INTERVAL
+        current_tick = self.current_timestamp / self.UPDATE_TRADES_MIN_INTERVAL
+
+        if current_tick > last_tick and len(self._in_flight_orders) > 0:
+            # Composer Client to Exchange order_id map as Bitrue exchange does not support client order ids.
+            tracked_orders = list(self._in_flight_orders.values())
+            exch_orders_map = dict()
+            for tracked_order in tracked_orders:
+                order_id: str = tracked_order.get_exchange_order_id()
+                exch_orders_map[order_id] = tracked_order.get_client_order_id()
+
+            tasks = []
+            try:
+                for trading_pair in self._trading_pairs:
+                    tasks.append(self.bitrue_client.get_my_trades(bitrue_utils.convert_to_exchange_trading_pair(trading_pair), limit=1000))
+
+                self.logger().debug(f"Polling for recent trades updates of {len(tasks)} orders.")
+                results = await safe_gather(*tasks, return_exceptions=True)
+
+                for result in results:
+                    if isinstance(result, Exception):
+                        raise result
+                    trades: List[Dict[str, any]] = result
+                    max_trade_id = 0
+                    for trade in trades[::-1]:
+                        trading_pair = bitrue_utils.convert_from_exchange_trading_pair(trade['symbol'])
+                        # Process only trades that haven't been seen before
+                        if trade['id'] > self.last_max_trade_id[trading_pair]:
+                            trade['client_order_id'] = exch_orders_map[str(trade['orderId'])]
+                            self._process_trade_message(trade)
+                            # Update last_max_trade_id
+                            max_trade_id = max(max_trade_id, trade['id'])
+                    self.last_max_trade_id[trading_pair] = max(max_trade_id, self.last_max_trade_id[trading_pair])
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                self.logger().error("Unexpected error with REST API request...",
+                                    exc_info=True)
+                await asyncio.sleep(self.ERROR_TIMEOUT)
 
     def _process_order_message(self, order_msg: Dict[str, Any]):
         """
@@ -593,8 +680,30 @@ class BitrueMarket(ExchangeBase):
         if client_order_id not in self._in_flight_orders:
             return
         tracked_order = self._in_flight_orders[client_order_id]
+
         # Update order execution status
-        tracked_order.last_state = order_msg["status"]
+        if tracked_order.last_state != order_msg["status"]:
+            tracked_order.last_state = order_msg["status"]
+            # If status changed to 'FILLED', trigger order completion event
+            if order_msg["status"] == 'FILLED':
+                tracked_order.executed_amount_base = Decimal(order_msg["executedQty"])
+                tracked_order.executed_amount_quote = Decimal(order_msg["cummulativeQuoteQty"])
+
+                event_tag = MarketEvent.BuyOrderCompleted if tracked_order.trade_type is TradeType.BUY \
+                    else MarketEvent.SellOrderCompleted
+                event_class = BuyOrderCompletedEvent if tracked_order.trade_type is TradeType.BUY \
+                    else SellOrderCompletedEvent
+                self.trigger_event(event_tag,
+                                   event_class(self.current_timestamp,
+                                               tracked_order.client_order_id,
+                                               tracked_order.base_asset,
+                                               tracked_order.quote_asset,
+                                               tracked_order.fee_asset,
+                                               tracked_order.executed_amount_base,
+                                               tracked_order.executed_amount_quote,
+                                               tracked_order.fee_paid,
+                                               tracked_order.order_type))
+
         if tracked_order.is_cancelled:
             self.logger().info(f"Successfully cancelled order {client_order_id}.")
             self.trigger_event(MarketEvent.OrderCancelled,
@@ -604,8 +713,7 @@ class BitrueMarket(ExchangeBase):
             tracked_order.cancelled_event.set()
             self.stop_tracking_order(client_order_id)
         elif tracked_order.is_failure:
-            self.logger().info(f"The market order {client_order_id} has failed according to order status API. "
-                               f"Reason: {bitrue_utils.get_api_reason(order_msg['reason'])}")
+            self.logger().info(f"The market order {client_order_id} has failed according to order status API.")
             self.trigger_event(MarketEvent.OrderFailure,
                                MarketOrderFailureEvent(
                                    self.current_timestamp,
@@ -614,14 +722,13 @@ class BitrueMarket(ExchangeBase):
                                ))
             self.stop_tracking_order(client_order_id)
 
-    async def _process_trade_message(self, trade_msg: Dict[str, Any]):
+    def _process_trade_message(self, trade_msg: Dict[str, Any]):
         """
         Updates in-flight order and trigger order filled event for trade message received. Triggers order completed
         event if the total executed amount equals to the specified order amount.
         """
-        for order in self._in_flight_orders.values():
-            await order.get_exchange_order_id()
-        track_order = [o for o in self._in_flight_orders.values() if trade_msg["order_id"] == o.exchange_order_id]
+
+        track_order = [o for o in self._in_flight_orders.values() if trade_msg["orderId"] == o.exchange_order_id]
         if not track_order:
             return
         tracked_order = track_order[0]
@@ -636,32 +743,13 @@ class BitrueMarket(ExchangeBase):
                 tracked_order.trading_pair,
                 tracked_order.trade_type,
                 tracked_order.order_type,
-                Decimal(str(trade_msg["traded_price"])),
-                Decimal(str(trade_msg["traded_quantity"])),
-                TradeFee(0.0, [(trade_msg["fee_currency"], Decimal(str(trade_msg["fee"])))]),
-                exchange_trade_id=trade_msg["order_id"]
+                Decimal(str(trade_msg["price"])),
+                Decimal(str(trade_msg["qty"])),
+                TradeFee(0.0, [(tracked_order.base_asset, Decimal("0"))]),
+                exchange_trade_id=str(trade_msg["id"])
             )
         )
-        if math.isclose(tracked_order.executed_amount_base, tracked_order.amount) or \
-                tracked_order.executed_amount_base >= tracked_order.amount:
-            tracked_order.last_state = "FILLED"
-            self.logger().info(f"The {tracked_order.trade_type.name} order "
-                               f"{tracked_order.client_order_id} has completed "
-                               f"according to order status API.")
-            event_tag = MarketEvent.BuyOrderCompleted if tracked_order.trade_type is TradeType.BUY \
-                else MarketEvent.SellOrderCompleted
-            event_class = BuyOrderCompletedEvent if tracked_order.trade_type is TradeType.BUY \
-                else SellOrderCompletedEvent
-            self.trigger_event(event_tag,
-                               event_class(self.current_timestamp,
-                                           tracked_order.client_order_id,
-                                           tracked_order.base_asset,
-                                           tracked_order.quote_asset,
-                                           tracked_order.fee_asset,
-                                           tracked_order.executed_amount_base,
-                                           tracked_order.executed_amount_quote,
-                                           tracked_order.fee_paid,
-                                           tracked_order.order_type))
+        if tracked_order.last_state == 'FILLED':
             self.stop_tracking_order(tracked_order.client_order_id)
 
     async def cancel_all(self, timeout_seconds: float):
@@ -698,7 +786,6 @@ class BitrueMarket(ExchangeBase):
         Is called automatically by the clock for each clock's tick (1 second by default).
         It checks if status polling task is due for execution.
         """
-
         now = time.time()
         poll_interval = (self.SHORT_POLL_INTERVAL
                          if now - self._user_stream_tracker.last_recv_time > 60.0
@@ -707,17 +794,15 @@ class BitrueMarket(ExchangeBase):
         current_tick = timestamp / poll_interval
 
         if current_tick > last_tick:
-            print('tick', 'current_tick > last_tick')
             if not self._poll_notifier.is_set():
-                print('tick set nf')
                 self._poll_notifier.set()
         self._last_timestamp = timestamp
+        self._current_timestamp = timestamp
 
     async def test_ticker(self):
         ''' Temporary function for connector testing '''
         while True:
             self.tick(time.time())
-            print('test_ticker, account_balances', self._account_balances)
             await asyncio.sleep(2)
 
     def get_fee(self,
@@ -734,3 +819,10 @@ class BitrueMarket(ExchangeBase):
         """
         is_maker = order_type is OrderType.LIMIT_MAKER
         return TradeFee(percent=self.estimate_fee_pct(is_maker))
+
+    async def _user_stream_event_listener(self):
+        """
+        Listens to message in _user_stream_tracker.user_stream queue.
+        """
+        # Bitrue exchange does not have websocket API, just pass.
+        pass

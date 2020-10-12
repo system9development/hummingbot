@@ -199,7 +199,7 @@ class BitrueMarketUnitTest(unittest.TestCase):
             self.web_app.update_response("get", BASE_API_URL, "/api/v1/order", resp,
                                          params={'orderId': resp["orderId"]})
 
-    def utest_buy_and_sell(self):
+    def test_buy_and_sell(self):
         price = self.connector.get_price(self.trading_pair, True) * Decimal("1.05")
         price = self.connector.quantize_order_price(self.trading_pair, price)
         amount = self.connector.quantize_order_amount(self.trading_pair, Decimal("10"))
@@ -269,7 +269,7 @@ class BitrueMarketUnitTest(unittest.TestCase):
         # Bitrue.com does not support LIMIT_MAKER orders
         pass
 
-    def utest_cancel_all(self):
+    def test_cancel_all(self):
         bid_price = self.connector.get_price(self.trading_pair, True)
         ask_price = self.connector.get_price(self.trading_pair, False)
         bid_price = self.connector.quantize_order_price(self.trading_pair, bid_price * Decimal("0.7"))
@@ -424,7 +424,7 @@ class BitrueMarketUnitTest(unittest.TestCase):
                 print(order_book.last_trade_price)
                 self.assertFalse(math.isnan(order_book.last_trade_price))
 
-    def utest_filled_orders_recorded(self):
+    def test_filled_orders_recorded(self):
         config_path: str = "test_config"
         strategy_name: str = "test_strategy"
         sql = SQLConnectionManager(SQLConnectionType.TRADE_FILLS, db_path=self.db_path)
