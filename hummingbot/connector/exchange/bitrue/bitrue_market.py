@@ -526,7 +526,7 @@ class BitrueMarket(ExchangeBase):
 
             result = await self.bitrue_client.cancel_order(symbol=bitrue_utils.convert_to_exchange_trading_pair(trading_pair), order_id=ex_order_id)
             if isinstance(result, dict) and str(result.get("orderId")) == ex_order_id:
-                self.logger().info(f"Successfully cancelled order {order_id}.")
+                self.logger().debug(f"Successfully cancelled order {order_id}.")
                 self.trigger_event(
                     MarketEvent.OrderCancelled,
                     OrderCancelledEvent(
@@ -661,10 +661,13 @@ class BitrueMarket(ExchangeBase):
                         trading_pair = bitrue_utils.convert_from_exchange_trading_pair(trade['symbol'])
                         # Process only trades that haven't been seen before
                         if trade['id'] > self.last_max_trade_id[trading_pair]:
-                            trade['client_order_id'] = exch_orders_map[str(trade['orderId'])]
-                            self._process_trade_message(trade)
-                            # Update last_max_trade_id
-                            max_trade_id = max(max_trade_id, trade['id'])
+                            try:
+                                trade['client_order_id'] = exch_orders_map[str(trade['orderId'])]
+                                self._process_trade_message(trade)
+                                # Update last_max_trade_id
+                                max_trade_id = max(max_trade_id, trade['id'])
+                            except KeyError as e:
+                                self.logger().debug(f"Trade Discarded: {trade}. The trade orderID did not match any tracked ids... {e}", exc_info=True)
                     self.last_max_trade_id[trading_pair] = max(max_trade_id, self.last_max_trade_id[trading_pair])
             except asyncio.CancelledError:
                 raise

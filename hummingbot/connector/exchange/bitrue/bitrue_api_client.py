@@ -77,14 +77,13 @@ class BitrueAPIClient:
 
         try:
             response_text = await response.text()
-            parsed_response = json.loads(response_text)
+            if response.status != 200:
+                raise IOError(f"Error fetching data from {url}. HTTP status is {response.status}.")
+            else:
+                parsed_response = json.loads(response_text)
+                return parsed_response
         except Exception as e:
             raise IOError(f"Error parsing data from {url}. Error: {str(e)}")
-        if response.status != 200:
-            raise IOError(f"Error fetching data from {url}. HTTP status is {response.status}. "
-                          f"Message: {parsed_response}")
-
-        return parsed_response
         return None
 
     def _generate_signature(self, params: Dict[str, Any]) -> str:
