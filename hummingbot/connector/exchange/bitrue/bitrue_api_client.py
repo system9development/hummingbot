@@ -50,7 +50,7 @@ class BitrueAPIClient:
             params = {}
 
         if "timestamp" not in params:
-            params['timestamp'] = int(time.time() * 1000)
+            params['timestamp'] = int(time.time() * 1000) + 1000
 
         params_sorted = sorted([(k, v) for (k, v) in params.items()])
         query_string = '&'.join(["{}={}".format(d[0], d[1]) for d in params_sorted])
@@ -82,7 +82,8 @@ class BitrueAPIClient:
             raise IOError(f"Error parsing data from {url}. Error: {str(e)}")
         if response.status != 200:
             raise IOError(f"Error fetching data from {url}. HTTP status is {response.status}. "
-                          f"Message: {parsed_response}")
+                          f"Message: {parsed_response} "
+                          f"Request params: {params}")
 
         return parsed_response
         return None
@@ -149,7 +150,7 @@ class BitrueAPIClient:
         api_response = await self.api_request("get", "/account", is_auth_required=True)
         return api_response
 
-    async def get_my_trades(self, symbol: str, limit: int = 1000):
+    async def get_my_trades(self, symbol: str, limit: int = 100):
         params = {'symbol': symbol, 'limit': limit}
         api_response = await self.api_request("get", "/myTrades", params=params, is_auth_required=True)
         return api_response
