@@ -1,20 +1,38 @@
-
 from typing import (
     Dict,
     Any,
 )
 from decimal import Decimal
-
 import hashlib
 import hmac
 import time
 import json
-
 import aiohttp
 
 
-class BitrueAPIClient:
+class BitrueException(Exception):
+    def __init__(self, info):
+        self.message = "Unable to fetch Bitrue API..."
+        self.info = info
 
+    def __str__(self) -> str:
+        return f"{self.message}{self.info}"
+
+
+class BitrueInternalServerException(BitrueException):
+    def __init__(self, info):
+        self.message = "Bitrue internal server error..."
+        self.info = info
+
+
+class BitrueRateLimitException(BitrueException):
+    def __init__(self, info):
+        self.message = "Bitrue rate limit exceeded..."
+        self.info = info
+
+
+class BitrueAPIClient:
+    BITRUE_ERRORS = {"default": BitrueException, 503: BitrueInternalServerException, 429: BitrueRateLimitException}
     REST_API_URL = "https://www.bitrue.com/api/v1"
 
     def __init__(self, api_key = '', api_secret = ''):
@@ -45,6 +63,7 @@ class BitrueAPIClient:
         :returns A response in json format.
         """
         url = f"{self.REST_API_URL}{path_url}"
+        method = method.lower()
 
         if params is None:
             params = {}
@@ -66,25 +85,30 @@ class BitrueAPIClient:
             headers = {"Content-Type": "application/json"}
 
         client = await self._http_client()
-        if method == "get":
-            response = await client.get(query_url, headers=headers)
-        elif method == "post":
-            response = await client.post(query_url, headers=headers)
-        elif method == "delete":
-            response = await client.delete(query_url, headers=headers)
-        else:
-            raise NotImplementedError
-
+        info = {}
         try:
+            if method == "get":
+                response = await client.get(query_url, headers=headers)
+            elif method == "post":
+                response = await client.post(query_url, headers=headers)
+            elif method == "delete":
+                response = await client.delete(query_url, headers=headers)
+            else:
+                raise NotImplementedError
             response_text = await response.text()
             if response.status != 200:
-                raise IOError(f"Error fetching data from {url}. HTTP status is {response.status}.")
+                info['status'] = response.status
+                info['text'] = response_text
+                info['url'] = query_url
+                if response.status in self.BITRUE_ERRORS:
+                    raise self.BITRUE_ERRORS[response.status](info)
+                else:
+                    raise self.BITRUE_ERRORS['default'](info)
             else:
                 parsed_response = json.loads(response_text)
                 return parsed_response
-        except Exception as e:
-            raise IOError(f"Error parsing data from {url}. Error: {str(e)}")
-        return None
+        except Exception:
+            raise
 
     def _generate_signature(self, params: Dict[str, Any]) -> str:
         params_sorted = sorted([(k, v) for (k, v) in params.items()])
@@ -151,4 +175,9 @@ class BitrueAPIClient:
     async def get_my_trades(self, symbol: str, limit: int = 1000):
         params = {'symbol': symbol, 'limit': limit}
         api_response = await self.api_request("get", "/myTrades", params=params, is_auth_required=True)
+        return api_response
+
+    async def get_open_orders(self, symbol, limit: int = 1000):
+        params = {'symbol': symbol, 'limit': limit}
+        api_response = await self.api_request("get", "/openOrders", params=params, is_auth_required=True)
         return api_response

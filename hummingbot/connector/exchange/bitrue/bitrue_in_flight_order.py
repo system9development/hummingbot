@@ -72,7 +72,7 @@ class BitrueInFlightOrder(InFlightOrderBase):
 
     def update_with_trade_update(self, trade_update: Dict[str, Any]) -> bool:
         """
-        Updates the in flight order with trade update (from /myTrades end point)
+        Updates the in flight order with trade update (from /openTrades end point)
         return: True if the order gets updated otherwise False
         """
 

@@ -40,7 +40,7 @@ from hummingbot.connector.exchange.bitrue.bitrue_user_stream_tracker import Bitr
 from hummingbot.connector.exchange.bitrue.bitrue_auth import BitrueAuth
 from hummingbot.connector.exchange.bitrue.bitrue_in_flight_order import BitrueInFlightOrder
 from hummingbot.connector.exchange.bitrue import bitrue_utils
-from hummingbot.connector.exchange.bitrue.bitrue_api_client import BitrueAPIClient
+from hummingbot.connector.exchange.bitrue.bitrue_api_client import BitrueAPIClient, BitrueInternalServerException
 
 s_decimal_NaN = Decimal("nan")
 
@@ -257,9 +257,9 @@ class BitrueMarket(ExchangeBase):
                     max_trade_id = 0
                     for trade in trades[::-1]:
                         # Process only trades that haven't been seen before
-                        if trade['id'] > self.last_max_trade_id[trading_pair]:
+                        if int(trade['id']) > self.last_max_trade_id[trading_pair]:
                             # Update last_max_trade_id
-                            max_trade_id = max(max_trade_id, trade['id'])
+                            max_trade_id = max(max_trade_id, int(trade['id']))
                     self.last_max_trade_id[trading_pair] = max(max_trade_id, self.last_max_trade_id[trading_pair])
             except asyncio.CancelledError:
                 raise
@@ -467,6 +467,18 @@ class BitrueMarket(ExchangeBase):
                                ))
         except asyncio.CancelledError:
             raise
+        except BitrueInternalServerException as e:
+            self.stop_tracking_order(order_id)
+            self.logger().network(
+                f"Error submitting {trade_type.name} {order_type.name} order to Bitrue.com for "
+                f"{amount} {trading_pair} "
+                f"{price}. Order status currently unknown!",
+                exc_info=True,
+                app_warning_msg=str(e)
+            )
+            # Order failure isn't triggered because the status of the order is unknown.
+            # self.trigger_event(MarketEvent.OrderFailure,
+            #                    MarketOrderFailureEvent(self.current_timestamp, order_id, order_type))
         except Exception as e:
             self.stop_tracking_order(order_id)
             self.logger().network(
@@ -512,17 +524,25 @@ class BitrueMarket(ExchangeBase):
         Executes order cancellation process by first calling cancel-order API. The API result doesn't confirm whether
         the cancellation is successful, it simply states it receives the request.
         :param trading_pair: The market trading pair
-        :param order_id: The internal order id
+        :param order_id: The internal/client order id
         :param wait_for_status: Whether to wait for the cancellation result, this is done by waiting for
         order.last_state to change to CANCELED
         """
         try:
             tracked_order = self._in_flight_orders.get(order_id)
             if tracked_order is None:
-                raise ValueError(f"Failed to cancel order - {order_id}. Order not found.")
-            if tracked_order.exchange_order_id is None:
-                await tracked_order.get_exchange_order_id()
-            ex_order_id = tracked_order.exchange_order_id
+                tracked_order = [order for order in self._in_flight_orders.values() if order.exchange_order_id == order_id]
+                tracked_order = tracked_order[0]
+            ex_order_id = None
+            untracked = False
+            if tracked_order is None:
+                self.logger().info(f"Trying to cancel untracked order - {order_id}. Order not found in tracked orders.")
+                ex_order_id = order_id
+                untracked = True
+            else:
+                if tracked_order.exchange_order_id is None:
+                    await tracked_order.get_exchange_order_id()
+                ex_order_id = tracked_order.exchange_order_id
 
             result = await self.bitrue_client.cancel_order(symbol=bitrue_utils.convert_to_exchange_trading_pair(trading_pair), order_id=ex_order_id)
             if isinstance(result, dict) and str(result.get("orderId")) == ex_order_id:
@@ -532,15 +552,24 @@ class BitrueMarket(ExchangeBase):
                     OrderCancelledEvent(
                         self.current_timestamp,
                         order_id))
-
-                if wait_for_status:
+                if wait_for_status and not untracked:
                     from hummingbot.core.utils.async_utils import wait_til
                     await wait_til(lambda: tracked_order.is_cancelled)
-                self.stop_tracking_order(order_id)
+                elif wait_for_status and untracked:
+                    cancel_result = await self.bitrue_client.get_order(bitrue_utils.convert_to_exchange_trading_pair(trading_pair), ex_order_id)
+                    if not cancel_result:
+                        raise Exception("Couldn't get canceled order from bitrue API for status check...")
+                    if cancel_result['status'] != "CANCELED":
+                        self.logger().info(f"Failed to cancel untracked order {ex_order_id}.")
                 return order_id
-
         except asyncio.CancelledError:
             raise
+        except BitrueInternalServerException as e:
+            self.logger().network(
+                f"Failed to cancel order {order_id}: {str(e)}",
+                exc_info=True,
+                app_warning_msg=f"Failed to cancel order {order_id}: {str(e)}"
+            )
         except Exception as e:
             self.logger().network(
                 f"Failed to cancel order {order_id}: {str(e)}",
@@ -611,12 +640,10 @@ class BitrueMarket(ExchangeBase):
             tasks = list()
             exch_orders_map = dict()
             for tracked_order in tracked_orders:
-
                 order_id: str = tracked_order.get_exchange_order_id()
                 tasks.append(self.bitrue_client.get_order(symbol=bitrue_utils.convert_to_exchange_trading_pair(tracked_order.trading_pair), order_id=order_id))
                 # Bitrue API does not support client order IDs, we should track them manually.
                 exch_orders_map[order_id] = tracked_order.get_client_order_id()
-
             self.logger().debug(f"Polling for order status updates of {len(tasks)} orders.")
             exch_orders = await safe_gather(*tasks, return_exceptions=True)
 
@@ -628,6 +655,32 @@ class BitrueMarket(ExchangeBase):
                     continue
                 exch_order['client_order_id'] = exch_orders_map[exch_order['orderId']]
                 self._process_order_message(exch_order)
+
+    async def _track_stray_orders(self):
+        """
+        Checks for untracked orders and tracks them :: UNUSED CURRENTLY
+        """
+        last_tick = self._last_poll_timestamp / self.UPDATE_ORDER_STATUS_MIN_INTERVAL
+        current_tick = self.current_timestamp / self.UPDATE_ORDER_STATUS_MIN_INTERVAL
+        if current_tick > last_tick:
+            tracked_orders = list(self._in_flight_orders.values())
+            for trading_pair in self._trading_pairs:
+                open_orders = await self.bitrue_client.get_open_orders(symbol=bitrue_utils.convert_to_exchange_trading_pair(trading_pair), limit=1000)
+                exch_order_ids: set = set([tracked_order.get_exchange_order_id() for tracked_order in tracked_orders])
+                for open_order in open_orders:
+                    if open_order['orderId'] not in exch_order_ids:
+                        self.logger().info("Found untracked order, trying to track...")
+                        order_id: str = bitrue_utils.get_new_client_order_id(open_order['side'], trading_pair)
+                        exchange_order_id = str(open_order["orderId"])
+                        order_type = OrderType.LIMIT
+                        trade_type = TradeType.BUY if open_order['side'] == 'BUY' else TradeType.SELL
+                        price = Decimal(open_order['price'])
+                        amount = Decimal(open_order['origQty'])
+                        self.start_tracking_order(order_id, exchange_order_id, trading_pair, trade_type, price, amount, order_type)
+                        self.logger().info(f"Began tracking {order_type.name} {trade_type.name} order {order_id} for {amount} {trading_pair}.")
+                        event_tag = MarketEvent.BuyOrderCreated if trade_type is TradeType.BUY else MarketEvent.SellOrderCreated
+                        event_class = BuyOrderCreatedEvent if trade_type is TradeType.BUY else SellOrderCreatedEvent
+                        self.trigger_event(event_tag, event_class(self.current_timestamp, order_type, trading_pair, amount, price, order_id))
 
     async def _update_trades(self):
         """
@@ -660,14 +713,15 @@ class BitrueMarket(ExchangeBase):
                     for trade in trades[::-1]:
                         trading_pair = bitrue_utils.convert_from_exchange_trading_pair(trade['symbol'])
                         # Process only trades that haven't been seen before
-                        if trade['id'] > self.last_max_trade_id[trading_pair]:
+                        if int(trade['id']) > self.last_max_trade_id[trading_pair]:
                             try:
                                 trade['client_order_id'] = exch_orders_map[str(trade['orderId'])]
                                 self._process_trade_message(trade)
                                 # Update last_max_trade_id
-                                max_trade_id = max(max_trade_id, trade['id'])
-                            except KeyError as e:
-                                self.logger().debug(f"Trade Discarded: {trade}. The trade orderID did not match any tracked ids... {e}", exc_info=True)
+                                max_trade_id = max(max_trade_id, int(trade['id']))
+                            except KeyError:
+                                self.logger().info("Unknown exhange order id found when processing trade history...")
+                                raise
                     self.last_max_trade_id[trading_pair] = max(max_trade_id, self.last_max_trade_id[trading_pair])
             except asyncio.CancelledError:
                 raise
@@ -757,23 +811,38 @@ class BitrueMarket(ExchangeBase):
         if tracked_order.last_state == 'FILLED':
             self.stop_tracking_order(tracked_order.client_order_id)
 
+    async def _get_open_orders(self, timeout_seconds: float):
+        open_orders = []
+        tasks = []
+        for trading_pair in self._trading_pairs:
+            tasks.append(self.bitrue_client.get_open_orders(bitrue_utils.convert_to_exchange_trading_pair(trading_pair), 1000))
+        async with timeout(timeout_seconds):
+            results = await safe_gather(*tasks, return_exceptions=True)
+            for result in results:
+                if result is not None and not isinstance(result, Exception):
+                    open_orders.extend(result)
+        return open_orders
+
     async def cancel_all(self, timeout_seconds: float):
         """
-        Cancels all in-flight orders and waits for cancellation results.
+        Cancels all open orders and waits for cancellation results.
         Used by bot's top level stop and exit commands (cancelling outstanding orders on exit)
         :param timeout_seconds: The timeout at which the operation will be canceled.
         :returns List of CancellationResult which indicates whether each order is successfully cancelled.
         """
-        incomplete_orders = [o for o in self._in_flight_orders.values() if not o.is_done]
-        tasks = [self._execute_cancel(o.trading_pair, o.client_order_id, True) for o in incomplete_orders]
-        order_id_set = set([o.client_order_id for o in incomplete_orders])
         successful_cancellations = []
+        tasks = []
+        order_id_set: set = set()
         try:
+            open_orders = await self._get_open_orders(timeout_seconds)
+            self.logger().network(log_msg="Trying to cancel all...", app_warning_msg="Current Open Orders According to Bitrue Before Cancel:\n" + str(open_orders))
+            order_id_set = set([str(order['orderId']) for order in open_orders if isinstance(order, dict) and not isinstance(order, Exception) and not None])
+            tasks = [self._execute_cancel(bitrue_utils.convert_from_exchange_trading_pair(order['symbol']), order['orderId'], True) for order in open_orders if order is not None or isinstance(order, Exception)]
             async with timeout(timeout_seconds):
                 results = await safe_gather(*tasks, return_exceptions=True)
                 for result in results:
                     if result is not None and not isinstance(result, Exception):
-                        order_id_set.remove(result)
+                        order_id_set.remove(str(result))
                         successful_cancellations.append(CancellationResult(result, True))
         except Exception:
             self.logger().error("Cancel all failed.", exc_info=True)
@@ -782,7 +851,8 @@ class BitrueMarket(ExchangeBase):
                 exc_info=True,
                 app_warning_msg="Failed to cancel order on Bitrue.com. Check API key and network connection."
             )
-
+        open_orders = await self._get_open_orders(timeout_seconds)
+        self.logger().network(log_msg="Trying to cancel all...", app_warning_msg="Current Open Orders According to Bitrue After Cancel:\n" + str(open_orders))
         failed_cancellations = [CancellationResult(oid, False) for oid in order_id_set]
         return successful_cancellations + failed_cancellations
 
