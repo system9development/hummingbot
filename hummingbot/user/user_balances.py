@@ -7,6 +7,7 @@ from hummingbot.connector.exchange.liquid.liquid_market import LiquidMarket
 from hummingbot.connector.exchange.kraken.kraken_market import KrakenMarket
 from hummingbot.connector.exchange.eterbase.eterbase_market import EterbaseMarket
 from hummingbot.connector.exchange.crypto_com.crypto_com_exchange import CryptoComExchange
+from hummingbot.connector.exchange.probit.probit_market import ProbitMarket
 from hummingbot.core.utils.market_mid_price import get_mid_price
 from hummingbot.client.settings import EXCHANGES, DEXES
 from hummingbot.client.config.security import Security
@@ -42,7 +43,8 @@ class UserBalances:
             market = EterbaseMarket(api_details[0], api_details[1], api_details[2])
         elif exchange == "crypto_com":
             market = CryptoComExchange(*api_details)
-
+        elif exchange == "probit":
+            market = ProbitMarket(*api_details)
         return market
 
     # return error message if the _update_balances fails

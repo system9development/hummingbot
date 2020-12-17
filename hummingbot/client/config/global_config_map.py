@@ -248,6 +248,18 @@ global_config_map = {
                   required_if=using_exchange("crypto_com"),
                   is_secure=True,
                   is_connect_key=True),
+    "probit_api_key":
+        ConfigVar(key="probit_api_key",
+                  prompt="Enter your Probit API key >>> ",
+                  required_if=using_exchange("probit"),
+                  is_secure=True,
+                  is_connect_key=True),
+    "probit_secret_key":
+        ConfigVar(key="probit_secret_key",
+                  prompt="Enter your Probit secret key >>> ",
+                  required_if=using_exchange("probit"),
+                  is_secure=True,
+                  is_connect_key=True),
     "celo_address":
         ConfigVar(key="celo_address",
                   prompt="Enter your Celo account address >>> ",
