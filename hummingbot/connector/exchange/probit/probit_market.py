@@ -593,13 +593,9 @@ class ProbitMarket(ExchangeBase):
         if current_tick > last_tick and len(self._in_flight_orders) > 0:
             tracked_orders = list(self._in_flight_orders.values())
             tasks = list()
-            exch_orders_map = dict()
             for tracked_order in tracked_orders:
-
                 order_id: str = tracked_order.get_exchange_order_id()
                 tasks.append(self.probit_client.get_order(symbol=probit_utils.convert_to_exchange_trading_pair(tracked_order.trading_pair), order_id=order_id))
-                # Probit API does not support client order IDs, we should track them manually.
-                exch_orders_map[order_id] = tracked_order.get_client_order_id()
 
             self.logger().debug(f"Polling for order status updates of {len(tasks)} orders.")
             exch_orders = await safe_gather(*tasks, return_exceptions=True)
@@ -609,7 +605,6 @@ class ProbitMarket(ExchangeBase):
                 if "id" not in exch_order[0]:
                     self.logger().info(f"'id' param is not in response: {exch_order}")
                     continue
-                exch_order[0]['client_order_id'] = exch_orders_map[exch_order[0]['id']]
                 self._process_order_message(exch_order[0])
 
     async def _update_trades(self):
@@ -620,13 +615,6 @@ class ProbitMarket(ExchangeBase):
         current_tick = self.current_timestamp / self.UPDATE_TRADES_MIN_INTERVAL
 
         if current_tick > last_tick and len(self._in_flight_orders) > 0:
-            # Compose Client to Exchange order_id map as Probit exchange does not support client order ids.
-            tracked_orders = list(self._in_flight_orders.values())
-            exch_orders_map = dict()
-            for tracked_order in tracked_orders:
-                order_id: str = tracked_order.get_exchange_order_id()
-                exch_orders_map[order_id] = tracked_order.get_client_order_id()
-
             tasks = []
             try:
                 for trading_pair in self._trading_pairs:
@@ -640,13 +628,13 @@ class ProbitMarket(ExchangeBase):
                     if isinstance(result, Exception):
                         raise result
                     trades: List[Dict[str, any]] = result
+
                     max_trade_ts = datetime(1970, 1, 1)
                     for trade in trades[::-1]:
                         trading_pair = probit_utils.convert_from_exchange_trading_pair(trade['market_id'])
                         # Process only trades that haven't been seen before
                         trade_time = datetime.strptime(trade['time'], '%Y-%m-%dT%H:%M:%S.%fZ')
-                        if trade_time > self.last_max_trade_ts[trading_pair]:
-                            trade['client_order_id'] = exch_orders_map[str(trade['order_id'])]
+                        if trade_time > self.last_max_trade_ts[trading_pair] and trade['status'] == 'settled':
                             self._process_trade_message(trade)
                             # Update last_max_trade_ts
                             max_trade_ts = max(max_trade_ts, trade_time)
@@ -667,15 +655,12 @@ class ProbitMarket(ExchangeBase):
         if client_order_id not in self._in_flight_orders:
             return
         tracked_order = self._in_flight_orders[client_order_id]
-
         # Update order execution status
         if tracked_order.last_state != order_msg["status"]:
+
             tracked_order.last_state = order_msg["status"]
             # If status changed to 'FILLED', trigger order completion event
             if order_msg["status"] == 'filled':
-                tracked_order.executed_amount_base = Decimal(order_msg["filled_quantity"])
-                tracked_order.executed_amount_quote = Decimal(order_msg["filled_cost"])
-
                 event_tag = MarketEvent.BuyOrderCompleted if tracked_order.trade_type is TradeType.BUY \
                     else MarketEvent.SellOrderCompleted
                 event_class = BuyOrderCompletedEvent if tracked_order.trade_type is TradeType.BUY \
@@ -686,8 +671,8 @@ class ProbitMarket(ExchangeBase):
                                                tracked_order.base_asset,
                                                tracked_order.quote_asset,
                                                tracked_order.fee_asset,
-                                               tracked_order.executed_amount_base,
-                                               tracked_order.executed_amount_quote,
+                                               Decimal(order_msg["filled_quantity"]),
+                                               Decimal(order_msg["filled_cost"]),
                                                tracked_order.fee_paid,
                                                tracked_order.order_type))
 
@@ -717,6 +702,7 @@ class ProbitMarket(ExchangeBase):
         track_order = [o for o in self._in_flight_orders.values() if str(trade_msg["order_id"]) == o.exchange_order_id]
         if not track_order:
             return
+
         tracked_order = track_order[0]
         updated = tracked_order.update_with_trade_update(trade_msg)
         if not updated:
@@ -735,8 +721,10 @@ class ProbitMarket(ExchangeBase):
                 exchange_trade_id=str(trade_msg["id"])
             )
         )
+
         if tracked_order.last_state == 'filled':
-            self.stop_tracking_order(tracked_order.client_order_id)
+            if tracked_order.executed_amount_base == tracked_order.amount:
+                self.stop_tracking_order(tracked_order.client_order_id)
 
     async def cancel_all(self, timeout_seconds: float):
         """

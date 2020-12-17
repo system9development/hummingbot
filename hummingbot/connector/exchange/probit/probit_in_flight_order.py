@@ -83,11 +83,9 @@ class ProbitInFlightOrder(InFlightOrderBase):
             return False
         self.trade_id_set.add(trade_id)
 
-        # Do not update executed amounts in filled orders
-        if self.last_state != 'filled':
-            self.executed_amount_base += Decimal(str(trade_update["quantity"]))
-            self.executed_amount_quote += (Decimal(str(trade_update["price"])) *
-                                           Decimal(str(trade_update["quantity"])))
+        self.executed_amount_base += Decimal(str(trade_update["quantity"]))
+        self.executed_amount_quote += (Decimal(str(trade_update["price"])) *
+                                       Decimal(str(trade_update["quantity"])))
         # Update fee info
         self.fee_asset = trade_update['fee_currency_id']
         self.fee_paid += Decimal(trade_update["fee_amount"])

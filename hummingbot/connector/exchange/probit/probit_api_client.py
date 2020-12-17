@@ -38,8 +38,8 @@ class ProbitAPIClient:
         '''
         token_url = 'https://accounts.probit.com/token'
 
-        # Refresh token if it expires in 30 seconds or less
-        if not self.auth_token or self.auth_token['created_at'] + self.auth_token['expires_in'] < time.time() - 30:
+        # Refresh token if it expires in 60 seconds or less
+        if not self.auth_token or self.auth_token['created_at'] + self.auth_token['expires_in'] < time.time() - 60:
             client = await self._http_client()
             auth_header = 'Basic ' + base64.b64encode(f'{self.api_key}:{self.api_secret}'.encode('utf-8')).decode('utf-8')
             headers = {
