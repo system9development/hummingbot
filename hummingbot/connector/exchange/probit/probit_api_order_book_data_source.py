@@ -78,7 +78,7 @@ class ProbitAPIOrderBookDataSource(OrderBookTrackerDataSource):
         self.last_trade_request_time[trading_pair] = end_time
         # Expected response
         # [{'id': 54866489, 'price': '0.0331220000000000', 'qty': '3.9570000000000000', 'time': 1601385563186, 'isBuyerMaker': True, 'isBestMatch': True}, {'id': 54866488, 'price': '0.0331220000000000', 'qty': '3.4310000000000000', 'time': 1601385563020, 'isBuyerMaker': True, 'isBestMatch': True}]
-
+        print('get_recent_trades ', recent_trades)
         return recent_trades
 
     async def get_new_order_book(self, trading_pair: str) -> OrderBook:
@@ -168,6 +168,7 @@ class ProbitAPIOrderBookDataSource(OrderBookTrackerDataSource):
     async def listen_for_trades(self, ev_loop: asyncio.BaseEventLoop, output: asyncio.Queue):
 
         while True:
+            print('listen_for_trades')
             try:
                 for trading_pair in self._trading_pairs:
                     trades: List[Dict[str, any]] = await self.get_recent_trades(trading_pair)

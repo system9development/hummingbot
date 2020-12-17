@@ -40,7 +40,7 @@ class ProbitOrderBook(OrderBook):
             "update_id": timestamp,
             "bids": bids,
             "asks": asks
-        }, timestamp=timestamp * 1e-3)
+        }, timestamp=timestamp)
 
     @classmethod
     def trade_message_from_exchange(cls,
@@ -57,4 +57,4 @@ class ProbitOrderBook(OrderBook):
             "update_id": timestamp,
             "price": float(msg["price"]),
             "amount": float(msg["quantity"])
-        }, timestamp=timestamp * 1e-3)
+        }, timestamp=timestamp)

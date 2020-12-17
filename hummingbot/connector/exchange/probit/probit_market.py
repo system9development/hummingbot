@@ -563,7 +563,6 @@ class ProbitMarket(ExchangeBase):
         """
         Calls REST API to update total and available balances.
         """
-        print('_update_balances')
         local_asset_names = set(self._account_balances.keys())
         remote_asset_names = set()
         balances = await self.probit_client.get_balance()
@@ -592,7 +591,6 @@ class ProbitMarket(ExchangeBase):
         current_tick = self.current_timestamp / self.UPDATE_ORDER_STATUS_MIN_INTERVAL
 
         if current_tick > last_tick and len(self._in_flight_orders) > 0:
-            print('_update_order_status')
             tracked_orders = list(self._in_flight_orders.values())
             tasks = list()
             exch_orders_map = dict()
@@ -605,7 +603,6 @@ class ProbitMarket(ExchangeBase):
 
             self.logger().debug(f"Polling for order status updates of {len(tasks)} orders.")
             exch_orders = await safe_gather(*tasks, return_exceptions=True)
-            print('_update_order_status exch_orders', exch_orders)
             for exch_order in exch_orders:
                 if isinstance(exch_order, Exception):
                     raise exch_order
@@ -623,7 +620,6 @@ class ProbitMarket(ExchangeBase):
         current_tick = self.current_timestamp / self.UPDATE_TRADES_MIN_INTERVAL
 
         if current_tick > last_tick and len(self._in_flight_orders) > 0:
-            print('_update_trades')
             # Compose Client to Exchange order_id map as Probit exchange does not support client order ids.
             tracked_orders = list(self._in_flight_orders.values())
             exch_orders_map = dict()
@@ -667,7 +663,6 @@ class ProbitMarket(ExchangeBase):
         Updates in-flight order and triggers cancellation or failure event if needed.
         :param order_msg: The order response from either REST or web socket API (they are of the same format)
         """
-        print('_process_order_message')
         client_order_id = order_msg["client_order_id"]
         if client_order_id not in self._in_flight_orders:
             return
@@ -695,7 +690,6 @@ class ProbitMarket(ExchangeBase):
                                                tracked_order.executed_amount_quote,
                                                tracked_order.fee_paid,
                                                tracked_order.order_type))
-                print(tracked_order)
 
         if tracked_order.is_cancelled:
             self.logger().info(f"Successfully cancelled order {client_order_id}.")
@@ -720,7 +714,6 @@ class ProbitMarket(ExchangeBase):
         Updates in-flight order and trigger order filled event for trade message received. Triggers order completed
         event if the total executed amount equals to the specified order amount.
         """
-        print('_process_trade_message', trade_msg)
         track_order = [o for o in self._in_flight_orders.values() if str(trade_msg["order_id"]) == o.exchange_order_id]
         if not track_order:
             return
