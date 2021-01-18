@@ -13,8 +13,29 @@ import json
 import aiohttp
 
 
-class BitrueAPIClient:
+class BitrueException(Exception):
+    def __init__(self, info):
+        self.message = "Unable to fetch Bitrue API..."
+        self.info = info
 
+    def __str__(self) -> str:
+        return f"{self.message}{self.info}"
+
+
+class BitrueInternalServerException(BitrueException):
+    def __init__(self, info):
+        self.message = "Bitrue internal server error..."
+        self.info = info
+
+
+class BitrueRateLimitException(BitrueException):
+    def __init__(self, info):
+        self.message = "Bitrue rate limit exceeded..."
+        self.info = info
+
+
+class BitrueAPIClient:
+    BITRUE_ERRORS = {"default": BitrueException, 503: BitrueInternalServerException, 429: BitrueRateLimitException}
     REST_API_URL = "https://www.bitrue.com/api/v1"
 
     def __init__(self, api_key = '', api_secret = ''):
@@ -77,14 +98,20 @@ class BitrueAPIClient:
 
         try:
             response_text = await response.text()
-            parsed_response = json.loads(response_text)
+            if response.status != 200:
+                info = {}
+                info['status'] = response.status
+                info['text'] = response_text
+                info['url'] = query_url
+                if response.status in self.BITRUE_ERRORS:
+                    raise self.BITRUE_ERRORS[response.status](info)
+                else:
+                    raise self.BITRUE_ERRORS['default'](info)
+            else:
+                parsed_response = json.loads(response_text)
+                return parsed_response
         except Exception as e:
             raise IOError(f"Error parsing data from {url}. Error: {str(e)}")
-        if response.status != 200:
-            raise IOError(f"Error fetching data from {url}. HTTP status is {response.status}. "
-                          f"Message: {parsed_response} "
-                          f"Request params: {params}")
-
         return parsed_response
         return None
 
