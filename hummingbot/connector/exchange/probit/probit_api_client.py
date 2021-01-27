@@ -1,4 +1,5 @@
 
+from json.decoder import JSONDecodeError
 from typing import (
     Dict,
     Any,
@@ -54,6 +55,8 @@ class ProbitAPIClient:
                 response_text = await response.text()
                 self.auth_token = json.loads(response_text)
                 self.auth_token['created_at'] = time.time()
+            except JSONDecodeError as e:
+                raise IOError(f"Error parsing data from {token_url}. Error: {str(e.msg)} Data: {e.doc}")
             except Exception as e:
                 raise IOError(f"Error parsing data from {token_url}. Error: {str(e)}")
             if response.status != 200:
