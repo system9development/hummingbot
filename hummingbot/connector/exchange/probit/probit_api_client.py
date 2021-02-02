@@ -38,27 +38,26 @@ class ProbitAPIClient:
         '''
         token_url = 'https://accounts.probit.com/token'
 
-        # Refresh token if it expires in 60 seconds or less
-        if not self.auth_token or self.auth_token['created_at'] + self.auth_token['expires_in'] < time.time() - 60:
-            client = await self._http_client()
-            auth_header = 'Basic ' + base64.b64encode(f'{self.api_key}:{self.api_secret}'.encode('utf-8')).decode('utf-8')
-            headers = {
-                "Authorization": auth_header,
-                "Content-Type": "application/json"
-            }
-            body = json.dumps({'grant_type': 'client_credentials'})
 
-            response = await client.post(token_url, headers=headers, data=body)
+        client = await self._http_client()
+        auth_header = 'Basic ' + base64.b64encode(f'{self.api_key}:{self.api_secret}'.encode('utf-8')).decode('utf-8')
+        headers = {
+            "Authorization": auth_header,
+            "Content-Type": "application/json"
+        }
+        body = json.dumps({'grant_type': 'client_credentials'})
 
-            try:
-                response_text = await response.text()
-                self.auth_token = json.loads(response_text)
-                self.auth_token['created_at'] = time.time()
-            except Exception as e:
-                raise IOError(f"Error parsing data from {token_url}. Error: {str(e)}")
-            if response.status != 200:
-                raise IOError(f"Error fetching data from {token_url}. HTTP status is {response.status}. "
-                              f"Message: {response_text} ")
+        response = await client.post(token_url, headers=headers, data=body)
+
+        try:
+            response_text = await response.text()
+            self.auth_token = json.loads(response_text)
+            self.auth_token['created_at'] = time.time()
+        except Exception as e:
+            raise IOError(f"Error parsing data from {token_url}. Error: {str(e)}")
+        if response.status != 200:
+            raise IOError(f"Error fetching data from {token_url}. HTTP status is {response.status}. "
+                          f"Message: {response_text} ")
 
         return self.auth_token
 
