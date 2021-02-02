@@ -549,6 +549,7 @@ class ProbitMarket(ExchangeBase):
                     self._update_trades()
                 )
                 self._last_poll_timestamp = self._current_timestamp
+                await asyncio.sleep(60.0)
             except asyncio.CancelledError:
                 raise
             except Exception as e:
