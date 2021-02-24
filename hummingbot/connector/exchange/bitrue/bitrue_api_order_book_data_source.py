@@ -61,7 +61,7 @@ class BitrueAPIOrderBookDataSource(OrderBookTrackerDataSource):
         Get whole orderbook
         """
 
-        order_book = await self.bitrue_client.get_order_book(symbol=bitrue_utils.convert_to_exchange_trading_pair(trading_pair), limit=1000)
+        order_book = await self.bitrue_client.get_order_book(symbol=bitrue_utils.convert_to_exchange_trading_pair(trading_pair), limit=50)
         # Expected output
         # {'lastUpdateId': 1601302979911, 'bids': [['0.033366', '0.74', []], ['0.033365', '9.461', []]], 'asks': [['0.033369', '1.295', []], ['0.033370', '9.36', []]]}
 
