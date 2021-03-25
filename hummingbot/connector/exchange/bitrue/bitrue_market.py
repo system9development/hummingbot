@@ -647,7 +647,7 @@ class BitrueMarket(ExchangeBase):
             tasks = []
             try:
                 for trading_pair in self._trading_pairs:
-                    tasks.append(self.bitrue_client.get_my_trades(bitrue_utils.convert_to_exchange_trading_pair(trading_pair), limit=1000))
+                    tasks.append(self.bitrue_client.get_my_trades(bitrue_utils.convert_to_exchange_trading_pair(trading_pair), limit=100))
 
                 self.logger().debug(f"Polling for recent trades updates of {len(tasks)} orders.")
                 results = await safe_gather(*tasks, return_exceptions=True)
