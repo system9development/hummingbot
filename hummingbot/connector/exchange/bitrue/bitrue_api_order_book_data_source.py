@@ -72,7 +72,7 @@ class BitrueAPIOrderBookDataSource(OrderBookTrackerDataSource):
         Get recent trades from REST API
         """
 
-        recent_trades = await self.bitrue_client.get_recent_trades(symbol=bitrue_utils.convert_to_exchange_trading_pair(trading_pair), limit=1000)
+        recent_trades = await self.bitrue_client.get_recent_trades(symbol=bitrue_utils.convert_to_exchange_trading_pair(trading_pair), limit=100)
         # Expected response
         # [{'id': 54866489, 'price': '0.0331220000000000', 'qty': '3.9570000000000000', 'time': 1601385563186, 'isBuyerMaker': True, 'isBestMatch': True}, {'id': 54866488, 'price': '0.0331220000000000', 'qty': '3.4310000000000000', 'time': 1601385563020, 'isBuyerMaker': True, 'isBestMatch': True}]
 
