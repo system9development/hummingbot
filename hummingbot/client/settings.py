@@ -39,7 +39,8 @@ EXCHANGES = {
     "eterbase",
     "kraken",
     "crypto_com",
-    "probit"
+    "probit",
+    "probit_kr"
 }
 
 DEXES = {
@@ -63,7 +64,8 @@ EXAMPLE_PAIRS = {
     "eterbase": "ETH-EUR",
     "kraken": "ETH-USDC",
     "crypto_com": "ETH-USDT",
-    "probit": "XRP-USDT"
+    "probit": "XRP-USDT",
+    "probit_kr" : "XRP-USDT"
 }
 
 EXAMPLE_ASSETS = {
@@ -79,7 +81,8 @@ EXAMPLE_ASSETS = {
     "eterbase": "ETH",
     "kraken": "XETH",
     "crypto_com": "ETH",
-    "probit": "XRP"
+    "probit": "XRP",
+    "probit_kr": "XRP"
 }
 
 MAXIMUM_OUTPUT_PANE_LINE_COUNT = 1000

@@ -22,7 +22,8 @@ OPTIONS = {
     "eterbase",
     "celo",
     "crypto_com",
-    "probit"
+    "probit",
+    "probit_kr"
 }
 
 

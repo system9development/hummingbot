@@ -70,8 +70,8 @@ class ProbitMarket(ExchangeBase):
                  probit_api_key: str,
                  probit_api_secret: str,
                  trading_pairs: Optional[List[str]] = None,
-                 trading_required: bool = True
-                 ):
+                 trading_required: bool = True,
+                 domain: str = "com"):
         """
         :param probit_api_key: The API key to connect to private Probit.com APIs.
         :param probit_api_secret: The API secret.
@@ -106,7 +106,8 @@ class ProbitMarket(ExchangeBase):
 
         self.last_max_trade_ts: Dict[str, datetime] = {}
 
-        self.probit_client = ProbitAPIClient(probit_api_key, probit_api_secret)
+        self._domain: str = domain
+        self.probit_client = ProbitAPIClient(probit_api_key, probit_api_secret, domain)
 
     @property
     def name(self) -> str:

@@ -15,14 +15,15 @@ import aiohttp
 
 class ProbitAPIClient:
 
-    REST_API_URL = "https://api.probit.com/api/exchange/v1"
+    #REST_API_URL = "https://api.probit.com/api/exchange/v1"
+    REST_API_URL = "https://api.probit.{domain}/api/exchange/v1"
 
-    def __init__(self, api_key = '', api_secret = ''):
+    def __init__(self, api_key = '', api_secret = '', domain='com'):
         self.api_key: str = api_key
         self.api_secret: str = api_secret
         self.auth_token: Dict[str, Any] = None
         self._shared_client: aiohttp.ClientSession = None
-
+        self._URL = self.REST_API_URL.format(domain=domain)
     async def _http_client(self) -> aiohttp.ClientSession:
         """
         :returns Shared client session instance
@@ -77,7 +78,7 @@ class ProbitAPIClient:
         signature to the request.
         :returns A response in json format.
         """
-        query_url = f"{self.REST_API_URL}{path_url}"
+        query_url = f"{self._URL}{path_url}"
 
         if params is None:
             params = {}

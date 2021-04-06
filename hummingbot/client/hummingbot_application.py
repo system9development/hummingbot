@@ -339,7 +339,15 @@ class HummingbotApplication(*commands):
                 secret_key = global_config_map.get("probit_secret_key").value
                 market = ProbitMarket(api_key, secret_key,
                                       trading_pairs=trading_pairs,
-                                      trading_required=self._trading_required)
+                                      trading_required=self._trading_required,
+                                      domain="com")
+            elif market_name == "probit_kr":
+                api_key = global_config_map.get("probit_kr_api_key").value
+                secret_key = global_config_map.get("probit_kr_secret_key").value
+                market = ProbitMarket(api_key, secret_key,
+                                      trading_pairs=trading_pairs,
+                                      trading_required=self._trading_required,
+                                      domain="kr")
             else:
                 raise ValueError(f"Market name {market_name} is invalid.")
 

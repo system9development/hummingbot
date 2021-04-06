@@ -45,6 +45,8 @@ class UserBalances:
             market = CryptoComExchange(*api_details)
         elif exchange == "probit":
             market = ProbitMarket(*api_details)
+        elif exchange == "probit_kr":
+            market = ProbitMarket(*api_details)
         return market
 
     # return error message if the _update_balances fails
