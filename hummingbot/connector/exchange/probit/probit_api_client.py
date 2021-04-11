@@ -37,8 +37,6 @@ class ProbitAPIClient:
         :returns An auth toke to be used in authorized requests.
         '''
         token_url = 'https://accounts.probit.com/token'
-
-
         client = await self._http_client()
         auth_header = 'Basic ' + base64.b64encode(f'{self.api_key}:{self.api_secret}'.encode('utf-8')).decode('utf-8')
         headers = {
@@ -107,10 +105,11 @@ class ProbitAPIClient:
         except Exception as e:
             raise IOError(f"Error parsing data from {query_url}. Error: {str(e)}")
         if response.status != 200:
-            raise IOError(f"Error fetching data from {query_url}. HTTP status is {response.status}. "
-                          f"Message: {parsed_response} "
-                          f"Request params: {params} "
-                          f"Request data: {data}")
+            print(f"Error fetching data from {query_url}. HTTP status is {response.status}. "
+                  f"Message: {parsed_response} "
+                  f"Request params: {params} "
+                  f"Request data: {data}")
+            return parsed_response
 
         return parsed_response
 
@@ -177,8 +176,11 @@ class ProbitAPIClient:
             'order_id': order_id,
             'market_id': symbol
         }
-        api_response = await self.api_request("post", "/cancel_order", data=params, is_auth_required=True)
-        return api_response['data']
+        try:
+            api_response = await self.api_request("post", "/cancel_order", data=params, is_auth_required=True)
+            return api_response.get('data', api_response)
+        except Exception as e:
+            raise e
 
     async def get_order_history(self, symbol: str, start_time: datetime, end_time: datetime, limit: int = 100):
         req_start_time = start_time.isoformat().split('.')[0] + '.000Z'

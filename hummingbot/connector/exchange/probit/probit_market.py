@@ -510,20 +510,15 @@ class ProbitMarket(ExchangeBase):
             ex_order_id = tracked_order.exchange_order_id
 
             result = await self.probit_client.cancel_order(symbol=probit_utils.convert_to_exchange_trading_pair(trading_pair), order_id=ex_order_id)
-            if isinstance(result, dict) and str(result.get("id")) == ex_order_id:
+            if (isinstance(result, dict) and str(result.get("id")) == ex_order_id) or (isinstance(result, dict) and str(result.get("errorCode") == 'INVALID_ORDER')):
                 self.logger().info(f"Successfully cancelled order {order_id}.")
                 self.trigger_event(
                     MarketEvent.OrderCancelled,
                     OrderCancelledEvent(
                         self.current_timestamp,
                         order_id))
-
-                if wait_for_status:
-                    from hummingbot.core.utils.async_utils import wait_til
-                    await wait_til(lambda: tracked_order.is_cancelled)
                 self.stop_tracking_order(order_id)
                 return order_id
-
         except asyncio.CancelledError:
             raise
         except Exception as e:
