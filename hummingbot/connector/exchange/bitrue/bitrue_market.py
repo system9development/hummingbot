@@ -677,8 +677,11 @@ class BitrueMarket(ExchangeBase):
                         trading_pair = bitrue_utils.convert_from_exchange_trading_pair(trade['symbol'])
                         # Process only trades that haven't been seen before
                         if trade['id'] > self.last_max_trade_id[trading_pair]:
-                            trade['client_order_id'] = exch_orders_map[str(trade['orderId'])]
-                            self._process_trade_message(trade)
+                            trade['client_order_id'] = exch_orders_map.get(str(trade['orderId']))
+                            if trade['client_order_id']:
+                                self._process_trade_message(trade)
+                            else:
+                                self.logger().error(f"Found untracked order: {trade}")
                             # Update last_max_trade_id
                             max_trade_id = max(max_trade_id, trade['id'])
                     self.last_max_trade_id[trading_pair] = max(max_trade_id, self.last_max_trade_id[trading_pair])
