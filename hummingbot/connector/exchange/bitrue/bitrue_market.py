@@ -40,7 +40,7 @@ from hummingbot.connector.exchange.bitrue.bitrue_user_stream_tracker import Bitr
 from hummingbot.connector.exchange.bitrue.bitrue_auth import BitrueAuth
 from hummingbot.connector.exchange.bitrue.bitrue_in_flight_order import BitrueInFlightOrder
 from hummingbot.connector.exchange.bitrue import bitrue_utils
-from hummingbot.connector.exchange.bitrue.bitrue_api_client import BitrueAPIClient
+from hummingbot.connector.exchange.bitrue.bitrue_api_client import BitrueAPIClient, BitrueAlreadyCanceledException
 
 s_decimal_NaN = Decimal("nan")
 
@@ -185,6 +185,20 @@ class BitrueMarket(ExchangeBase):
         """
         return [OrderType.LIMIT, OrderType.MARKET]
 
+    async def _get_open_orders(self) -> List[Dict[str, any]]:
+        try:
+            all_orders = []
+            resp = "\n"
+            for pair in self._trading_pairs:
+                orders = await self.bitrue_client.get_open_orders(bitrue_utils.convert_to_exchange_trading_pair(pair))
+                for order in orders:
+                    resp += f"{order['orderId']} {order['side']} {order['origQty']} @ {order['price']} with {order['executedQty']} filled." + "\n"
+                    all_orders.append(order)
+            self.logger().info(f"There are {len(all_orders)} open orders according to the Bitrue API {resp}")
+            return all_orders
+        except Exception as e:
+            self.logger().error(f"Error occured checking open orders... {e}", exc_info=True)
+
     def start(self, clock: Clock, timestamp: float):
         """
         This function is called automatically by the clock.
@@ -231,6 +245,7 @@ class BitrueMarket(ExchangeBase):
         if self._user_stream_event_listener_task is not None:
             self._user_stream_event_listener_task.cancel()
             self._user_stream_event_listener_task = None
+        await self._cancel_all_account()
 
     async def check_network(self) -> NetworkStatus:
         """
@@ -275,6 +290,7 @@ class BitrueMarket(ExchangeBase):
         while True:
             try:
                 await self._update_trading_rules()
+                await self._get_open_orders()
                 await asyncio.sleep(60)
             except asyncio.CancelledError:
                 raise
@@ -525,14 +541,13 @@ class BitrueMarket(ExchangeBase):
             ex_order_id = tracked_order.exchange_order_id
 
             result = await self.bitrue_client.cancel_order(symbol=bitrue_utils.convert_to_exchange_trading_pair(trading_pair), order_id=ex_order_id)
-            if isinstance(result, dict) and str(result.get("orderId")) == ex_order_id:
+            if (isinstance(result, dict) and str(result.get("orderId")) == ex_order_id) or isinstance(result, BitrueAlreadyCanceledException):
                 self.logger().info(f"Successfully cancelled order {order_id}.")
                 self.trigger_event(
                     MarketEvent.OrderCancelled,
                     OrderCancelledEvent(
                         self.current_timestamp,
                         order_id))
-
                 if wait_for_status:
                     from hummingbot.core.utils.async_utils import wait_til
                     await wait_til(lambda: tracked_order.is_cancelled)
@@ -619,13 +634,13 @@ class BitrueMarket(ExchangeBase):
 
             self.logger().debug(f"Polling for order status updates of {len(tasks)} orders.")
             exch_orders = await safe_gather(*tasks, return_exceptions=True)
-
             for exch_order in exch_orders:
                 if isinstance(exch_order, Exception):
                     raise exch_order
                 if "orderId" not in exch_order:
                     self.logger().info(f"orderId result not in resp: {exch_order}")
                     continue
+                # TODO: Remove exch_orders_map entirely, and simply tracked with in_flight_order.exchange_order_id
                 exch_order['client_order_id'] = exch_orders_map[exch_order['orderId']]
                 self._process_order_message(exch_order)
 
@@ -637,6 +652,7 @@ class BitrueMarket(ExchangeBase):
         current_tick = self.current_timestamp / self.UPDATE_TRADES_MIN_INTERVAL
 
         if current_tick > last_tick and len(self._in_flight_orders) > 0:
+            # TODO: remove exchange order id map and tracked with in_flight_order.exchange_order_id
             # Compose Client to Exchange order_id map as Bitrue exchange does not support client order ids.
             tracked_orders = list(self._in_flight_orders.values())
             exch_orders_map = dict()
@@ -682,7 +698,6 @@ class BitrueMarket(ExchangeBase):
         if client_order_id not in self._in_flight_orders:
             return
         tracked_order = self._in_flight_orders[client_order_id]
-
         # Update order execution status
         if tracked_order.last_state != order_msg["status"]:
             tracked_order.last_state = order_msg["status"]
@@ -707,7 +722,7 @@ class BitrueMarket(ExchangeBase):
                                                tracked_order.order_type))
 
         if tracked_order.is_cancelled:
-            self.logger().info(f"Successfully cancelled order {client_order_id}.")
+            self.logger().info(f"Successfully cancelled order {client_order_id} according to order status API")
             self.trigger_event(MarketEvent.OrderCancelled,
                                OrderCancelledEvent(
                                    self.current_timestamp,
@@ -729,7 +744,6 @@ class BitrueMarket(ExchangeBase):
         Updates in-flight order and trigger order filled event for trade message received. Triggers order completed
         event if the total executed amount equals to the specified order amount.
         """
-
         track_order = [o for o in self._in_flight_orders.values() if str(trade_msg["orderId"]) == o.exchange_order_id]
         if not track_order:
             return
@@ -762,7 +776,7 @@ class BitrueMarket(ExchangeBase):
         :returns List of CancellationResult which indicates whether each order is successfully cancelled.
         """
         incomplete_orders = [o for o in self._in_flight_orders.values() if not o.is_done]
-        tasks = [self._execute_cancel(o.trading_pair, o.client_order_id, True) for o in incomplete_orders]
+        tasks = [self._execute_cancel(o.trading_pair, o.client_order_id) for o in incomplete_orders]
         order_id_set = set([o.client_order_id for o in incomplete_orders])
         successful_cancellations = []
         try:
@@ -780,8 +794,32 @@ class BitrueMarket(ExchangeBase):
                 app_warning_msg="Failed to cancel order on Bitrue.com. Check API key and network connection."
             )
 
-        failed_cancellations = [CancellationResult(oid, False) for oid in order_id_set]
+        failed_cancellations = [CancellationResult(oid, False) for oid in order_id_set if oid not in [x.order_id for x in successful_cancellations]]
         return successful_cancellations + failed_cancellations
+
+    async def _cancel_all_account(self):
+        try:
+            self.logger().info("Attempting to cancel account orders")
+            orders = await self._get_open_orders()
+            for order in orders:
+                resp = None
+                try:
+                    resp = await self.bitrue_client.cancel_order(order['symbol'], order['orderId'])
+                except Exception as e:
+                    from hummingbot.connector.exchange.bitrue.bitrue_api_client import BitrueAlreadyCanceledException
+                    if isinstance(e, BitrueAlreadyCanceledException):
+                        pass
+                    else:
+                        raise e
+                        self.logger().error(f"Error while canceling order: {e}")
+                if resp and resp.get("orderId"):
+                    self.logger().info(f"Canceled order {resp['orderId']}")
+                await asyncio.sleep(1)
+            await asyncio.sleep(2)
+            after_orders = await self._get_open_orders()
+            self.logger().info(f"Orders after account cancel: {len(after_orders)}")
+        except Exception as e:
+            self.logger().error(f"Failed to cancel all account orders: {e}", exc_info=True)
 
     def tick(self, timestamp: float):
         """

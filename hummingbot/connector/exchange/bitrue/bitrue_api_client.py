@@ -34,8 +34,15 @@ class BitrueRateLimitException(BitrueException):
         self.info = info
 
 
+class BitrueAlreadyCanceledException(BitrueException):
+    def __init__(self, info):
+        self.message = "Order has already been canceled."
+        self.info = info
+        # {'status': 406, 'text': '{"code":-2011,"msg":"Order has already been canceled."}
+
+
 class BitrueAPIClient:
-    BITRUE_ERRORS = {"default": BitrueException, 503: BitrueInternalServerException, 429: BitrueRateLimitException}
+    BITRUE_ERRORS = {"default": BitrueException, 503: BitrueInternalServerException, 429: BitrueRateLimitException, 406: BitrueAlreadyCanceledException}
     REST_API_URL = "https://www.bitrue.com/api/v1"
 
     def __init__(self, api_key = '', api_secret = ''):
@@ -96,24 +103,19 @@ class BitrueAPIClient:
         else:
             raise NotImplementedError
 
-        try:
-            response_text = await response.text()
-            if response.status != 200:
-                info = {}
-                info['status'] = response.status
-                info['text'] = response_text
-                info['url'] = query_url
-                if response.status in self.BITRUE_ERRORS:
-                    raise self.BITRUE_ERRORS[response.status](info)
-                else:
-                    raise self.BITRUE_ERRORS['default'](info)
+        response_text = await response.text()
+        if response.status != 200:
+            info = {}
+            info['status'] = response.status
+            info['text'] = response_text
+            info['url'] = query_url
+            if response.status in self.BITRUE_ERRORS:
+                raise self.BITRUE_ERRORS[response.status](info)
             else:
-                parsed_response = json.loads(response_text)
-                return parsed_response
-        except Exception as e:
-            raise IOError(f"Error parsing data from {url}. Error: {str(e)}")
-        return parsed_response
-        return None
+                raise self.BITRUE_ERRORS['default'](info)
+        else:
+            parsed_response = json.loads(response_text)
+            return parsed_response
 
     def _generate_signature(self, params: Dict[str, Any]) -> str:
         params_sorted = sorted([(k, v) for (k, v) in params.items()])
@@ -177,7 +179,9 @@ class BitrueAPIClient:
         api_response = await self.api_request("get", "/account", is_auth_required=True)
         return api_response
 
+    async def get_open_orders(self, symbol: str):
+        return await self.api_request("get", "/openOrders", params={"symbol": symbol}, is_auth_required=True)
+
     async def get_my_trades(self, symbol: str, limit: int = 100):
         params = {'symbol': symbol, 'limit': limit}
-        api_response = await self.api_request("get", "/myTrades", params=params, is_auth_required=True)
-        return api_response
+        return await self.api_request("get", "/myTrades", params=params, is_auth_required=True)
