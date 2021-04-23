@@ -194,7 +194,7 @@ class BitrueMarket(ExchangeBase):
                 for order in orders:
                     resp += f"{order['orderId']} {order['side']} {order['origQty']} @ {order['price']} with {order['executedQty']} filled." + "\n"
                     all_orders.append(order)
-            self.logger().info(f"There are {len(all_orders)} open orders according to the Bitrue API {resp}")
+            self._notify_hb_app(f"There are {len(all_orders)} open orders according to the Bitrue API {resp}")
             return all_orders
         except Exception as e:
             self.logger().error(f"Error occured checking open orders... {e}", exc_info=True)
@@ -540,7 +540,12 @@ class BitrueMarket(ExchangeBase):
                 await tracked_order.get_exchange_order_id()
             ex_order_id = tracked_order.exchange_order_id
 
-            result = await self.bitrue_client.cancel_order(symbol=bitrue_utils.convert_to_exchange_trading_pair(trading_pair), order_id=ex_order_id)
+            try:
+                result = await self.bitrue_client.cancel_order(symbol=bitrue_utils.convert_to_exchange_trading_pair(trading_pair), order_id=ex_order_id)
+            except BitrueAlreadyCanceledException as e:
+                result = e
+                self.logger().network(f"Tried to cancel order {ex_order_id}, but it was already canceled.")
+
             if (isinstance(result, dict) and str(result.get("orderId")) == ex_order_id) or isinstance(result, BitrueAlreadyCanceledException):
                 self.logger().info(f"Successfully cancelled order {order_id}.")
                 self.trigger_event(
@@ -802,7 +807,7 @@ class BitrueMarket(ExchangeBase):
 
     async def _cancel_all_account(self):
         try:
-            self.logger().info("Attempting to cancel account orders")
+            self._notify_hb_app("Attempting to cancel account orders")
             orders = await self._get_open_orders()
             for order in orders:
                 resp = None
@@ -814,13 +819,13 @@ class BitrueMarket(ExchangeBase):
                         pass
                     else:
                         raise e
-                        self.logger().error(f"Error while canceling order: {e}")
+                        self.logger().error(f"Error while canceling order directly from API: {e}")
                 if resp and resp.get("orderId"):
-                    self.logger().info(f"Canceled order {resp['orderId']}")
+                    self._notify_hb_app(f"Canceled order {resp['orderId']}")
                 await asyncio.sleep(1)
             await asyncio.sleep(2)
             after_orders = await self._get_open_orders()
-            self.logger().info(f"Orders after account cancel: {len(after_orders)}")
+            self._notify_hb_app(f"Orders after account cancel: {len(after_orders)}")
         except Exception as e:
             self.logger().error(f"Failed to cancel all account orders: {e}", exc_info=True)
 
@@ -869,3 +874,7 @@ class BitrueMarket(ExchangeBase):
         """
         # Bitrue exchange does not have websocket API, just pass.
         pass
+
+    def _notify_hb_app(self, msg: str):
+        from hummingbot.client.hummingbot_application import HummingbotApplication
+        HummingbotApplication.main_application()._notify(msg)
