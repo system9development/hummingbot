@@ -185,7 +185,7 @@ class BitrueMarket(ExchangeBase):
         """
         return [OrderType.LIMIT, OrderType.MARKET]
 
-    async def _get_open_orders(self) -> List[Dict[str, any]]:
+    async def _get_open_orders(self, notify: bool = True) -> List[Dict[str, any]]:
         try:
             all_orders = []
             resp = "\n"
@@ -194,7 +194,10 @@ class BitrueMarket(ExchangeBase):
                 for order in orders:
                     resp += f"{order['orderId']} {order['side']} {order['origQty']} @ {order['price']} with {order['executedQty']} filled." + "\n"
                     all_orders.append(order)
-            self._notify_hb_app(f"There are {len(all_orders)} open orders according to the Bitrue API {resp}")
+            if notify:
+                self._notify_hb_app(f"There are {len(all_orders)} open orders according to the Bitrue API {resp}")
+            else:
+                self.logger().info(f"There are {len(all_orders)} open orders according to the Bitrue API {resp}")
             return all_orders
         except Exception as e:
             self.logger().error(f"Error occured checking open orders... {e}", exc_info=True)
@@ -290,7 +293,7 @@ class BitrueMarket(ExchangeBase):
         while True:
             try:
                 await self._update_trading_rules()
-                await self._get_open_orders()
+                await self._get_open_orders(notify=False)
                 await asyncio.sleep(60)
             except asyncio.CancelledError:
                 raise
