@@ -139,6 +139,7 @@ def main():
         "sqlalchemy",
         "ujson",
         "yarl",
+        "python-bitrue"
     ]
 
     cython_kwargs = {

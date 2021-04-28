@@ -12,6 +12,10 @@ cmake-build-debug/
 
 ## Plugin-specific files:
 
+# Eclipse IDE with PyDev plugin
+.project
+.pydevproject
+
 # IntelliJ
 /out/
 

@@ -112,6 +112,9 @@ hitbtc_secret_key = os.getenv("HITBTC_SECRET_KEY")
 coinzoom_api_key = os.getenv("COINZOOM_API_KEY")
 coinzoom_secret_key = os.getenv("COINZOOM_SECRET_KEY")
 coinzoom_username = os.getenv("COINZOOM_USERNAME")
+# Bitrue Test
+bitrue_api_key = os.getenv("BITRUE_API_KEY")
+bitrue_secret_key = os.getenv("BITRUE_SECRET_KEY")
 
 # Wallet Tests
 test_erc20_token_address = os.getenv("TEST_ERC20_TOKEN_ADDRESS")
