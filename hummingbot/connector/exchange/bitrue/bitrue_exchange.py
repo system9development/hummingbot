@@ -45,7 +45,7 @@ from hummingbot.connector.exchange.bitrue.bitrue_api_client import BitrueAPIClie
 s_decimal_NaN = Decimal("nan")
 
 
-class BitrueMarket(ExchangeBase):
+class BitrueExchange(ExchangeBase):
     """
     BitrueMarket connects with Bitrue.com exchange and provides order book pricing, user account tracking and
     trading functionality.
@@ -67,19 +67,19 @@ class BitrueMarket(ExchangeBase):
 
     def __init__(self,
                  bitrue_api_key: str,
-                 bitrue_api_secret: str,
+                 bitrue_secret_key: str,
                  trading_pairs: Optional[List[str]] = None,
                  trading_required: bool = True
                  ):
         """
         :param bitrue_api_key: The API key to connect to private Bitrue.com APIs.
-        :param bitrue_api_secret: The API secret.
+        :param bitrue_secret_key: The API secret.
         :param trading_pairs: The market trading pairs which to track order book data.
         :param trading_required: Whether actual trading is needed.
         """
         super().__init__()
         self._trading_required = trading_required
-        self._bitrue_auth = BitrueAuth(bitrue_api_key, bitrue_api_secret)
+        self._bitrue_auth = BitrueAuth(bitrue_api_key, bitrue_secret_key)
         self._trading_pairs = trading_pairs
         self._order_book_tracker = BitrueOrderBookTracker(trading_pairs=trading_pairs)
         self._user_stream_tracker = BitrueUserStreamTracker(self._bitrue_auth, trading_pairs)
@@ -105,7 +105,7 @@ class BitrueMarket(ExchangeBase):
 
         self.last_max_trade_id: Dict[str, int] = {}
 
-        self.bitrue_client = BitrueAPIClient(bitrue_api_key, bitrue_api_secret)
+        self.bitrue_client = BitrueAPIClient(bitrue_api_key, bitrue_secret_key)
 
     @property
     def name(self) -> str:

@@ -3,7 +3,6 @@ import asyncio
 import logging
 import time
 import pandas as pd
-
 from typing import Optional, List, Dict, Any
 from hummingbot.core.data_type.order_book import OrderBook
 from hummingbot.core.data_type.order_book_message import OrderBookMessage
@@ -38,7 +37,7 @@ class BitrueAPIOrderBookDataSource(OrderBookTrackerDataSource):
         self._snapshot_msg: Dict[str, any] = {}
 
         # Bitrue REST API client
-        self.bitrue_client: BitrueAPIClient = BitrueAPIClient('', '')
+        self.bitrue_client: BitrueAPIClient = BitrueAPIClient()
 
         # This param is used to filter new trades from API response as Bitrue does not support incremental trades updates
         if trading_pairs:
@@ -46,14 +45,16 @@ class BitrueAPIOrderBookDataSource(OrderBookTrackerDataSource):
         else:
             self.last_max_trade_id: Dict[str, int] = None
 
-    async def get_last_traded_prices(self, trading_pairs: List[str]) -> Dict[str, float]:
-        tasks = [self.get_last_traded_price(t_pair) for t_pair in trading_pairs]
+    @classmethod
+    async def get_last_traded_prices(cls, trading_pairs: List[str]) -> Dict[str, float]:
+        tasks = [cls.get_last_traded_price(t_pair) for t_pair in trading_pairs]
         results = await safe_gather(*tasks)
         return {t_pair: result for t_pair, result in zip(trading_pairs, results)}
 
-    async def get_last_traded_price(self, trading_pair: str) -> float:
+    @classmethod
+    async def get_last_traded_price(cls, trading_pair: str) -> float:
         # Expected output from client request: {'symbol': 'ETHBTC', 'price': '0.033342'}
-        api_response = await self.bitrue_client.get_ticker_price(bitrue_utils.convert_to_exchange_trading_pair(trading_pair))
+        api_response = await BitrueAPIClient().get_ticker_price(bitrue_utils.convert_to_exchange_trading_pair(trading_pair))
         return float(api_response['price'])
 
     async def get_snapshot(self, trading_pair: str) -> Dict[str, any]:
@@ -77,6 +78,17 @@ class BitrueAPIOrderBookDataSource(OrderBookTrackerDataSource):
         # [{'id': 54866489, 'price': '0.0331220000000000', 'qty': '3.9570000000000000', 'time': 1601385563186, 'isBuyerMaker': True, 'isBestMatch': True}, {'id': 54866488, 'price': '0.0331220000000000', 'qty': '3.4310000000000000', 'time': 1601385563020, 'isBuyerMaker': True, 'isBestMatch': True}]
 
         return recent_trades
+
+    @staticmethod
+    async def fetch_trading_pairs() -> List[str]:
+        try:
+            markets = await BitrueAPIClient().get_exchange_info()
+            if markets.get("symbols"):
+                return [bitrue_utils.convert_from_exchange_trading_pair(market['symbol']) for market in markets.get("symbols")]
+            else:
+                raise IOError("Couldn't parse exchange_info")
+        except Exception as e:
+            print(f"Error fetching Bitrue trading pairs: {e}")
 
     async def get_new_order_book(self, trading_pair: str) -> OrderBook:
         snapshot: Dict[str, Any] = await self.get_snapshot(trading_pair)
