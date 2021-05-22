@@ -35,10 +35,10 @@ class HitbtcWebsocket(RequestId):
         return cls._logger
 
     def __init__(self,
-                 auth: Optional[HitbtcAuth] = None):
+                 auth: Optional[HitbtcAuth] = None, domain: str = "hitbtc.com"):
         self._auth: Optional[HitbtcAuth] = auth
         self._isPrivate = True if self._auth is not None else False
-        self._WS_URL = Constants.WS_PRIVATE_URL if self._isPrivate else Constants.WS_PUBLIC_URL
+        self._WS_URL = Constants.WS_PRIVATE_URL.format(domain) if self._isPrivate else Constants.WS_PUBLIC_URL.format(domain)
         self._client: Optional[websockets.WebSocketClientProtocol] = None
 
     # connect to exchange

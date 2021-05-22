@@ -24,6 +24,7 @@ from .hitbtc_utils import (
 
 class HitbtcAPIOrderBookDataSource(OrderBookTrackerDataSource):
     _logger: Optional[HummingbotLogger] = None
+    _domain: str = "hitbtc.com"
 
     @classmethod
     def logger(cls) -> HummingbotLogger:
@@ -31,30 +32,31 @@ class HitbtcAPIOrderBookDataSource(OrderBookTrackerDataSource):
             cls._logger = logging.getLogger(__name__)
         return cls._logger
 
-    def __init__(self, trading_pairs: List[str] = None):
+    def __init__(self, trading_pairs: List[str] = None, domain = "hitbtc.com"):
         super().__init__(trading_pairs)
         self._trading_pairs: List[str] = trading_pairs
         self._snapshot_msg: Dict[str, any] = {}
+        HitbtcAPIOrderBookDataSource._domain = domain
 
     @classmethod
     async def get_last_traded_prices(cls, trading_pairs: List[str]) -> Dict[str, Decimal]:
         results = {}
         if len(trading_pairs) > 1:
-            tickers: List[Dict[Any]] = await api_call_with_retries("GET", Constants.ENDPOINT["TICKER"])
+            tickers: List[Dict[Any]] = await api_call_with_retries("GET", Constants.ENDPOINT["TICKER"], domain=cls._domain)
         for trading_pair in trading_pairs:
             ex_pair: str = convert_to_exchange_trading_pair(trading_pair)
             if len(trading_pairs) > 1:
                 ticker: Dict[Any] = list([tic for tic in tickers if tic['symbol'] == ex_pair])[0]
             else:
                 url_endpoint = Constants.ENDPOINT["TICKER_SINGLE"].format(trading_pair=ex_pair)
-                ticker: Dict[Any] = await api_call_with_retries("GET", url_endpoint)
+                ticker: Dict[Any] = await api_call_with_retries("GET", url_endpoint, domain=cls._domain)
             results[trading_pair]: Decimal = Decimal(str(ticker["last"]))
         return results
 
     @staticmethod
-    async def fetch_trading_pairs() -> List[str]:
+    async def fetch_trading_pairs(domain: str = "hitbtc.com") -> List[str]:
         try:
-            symbols: List[Dict[str, Any]] = await api_call_with_retries("GET", Constants.ENDPOINT["SYMBOL"])
+            symbols: List[Dict[str, Any]] = await api_call_with_retries("GET", Constants.ENDPOINT["SYMBOL"], domain=domain)
             trading_pairs: List[str] = list([convert_from_exchange_trading_pair(sym["id"]) for sym in symbols])
             # Filter out unmatched pairs so nothing breaks
             return [sym for sym in trading_pairs if sym is not None]
@@ -71,7 +73,7 @@ class HitbtcAPIOrderBookDataSource(OrderBookTrackerDataSource):
         try:
             ex_pair = convert_to_exchange_trading_pair(trading_pair)
             orderbook_response: Dict[Any] = await api_call_with_retries("GET", Constants.ENDPOINT["ORDER_BOOK"],
-                                                                        params={"limit": 150, "symbols": ex_pair})
+                                                                        params={"limit": 150, "symbols": ex_pair}, domain=HitbtcAPIOrderBookDataSource._domain)
             return orderbook_response[ex_pair]
         except HitbtcAPIError as e:
             err = e.error_payload.get('error', e.error_payload)
@@ -98,7 +100,7 @@ class HitbtcAPIOrderBookDataSource(OrderBookTrackerDataSource):
         """
         while True:
             try:
-                ws = HitbtcWebsocket()
+                ws = HitbtcWebsocket(domain=self._domain)
                 await ws.connect()
 
                 for pair in self._trading_pairs:
@@ -136,7 +138,7 @@ class HitbtcAPIOrderBookDataSource(OrderBookTrackerDataSource):
         """
         while True:
             try:
-                ws = HitbtcWebsocket()
+                ws = HitbtcWebsocket(domain=self._domain)
                 await ws.connect()
 
                 order_book_methods = [

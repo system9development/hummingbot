@@ -74,7 +74,8 @@ class HitbtcExchange(ExchangeBase):
                  hitbtc_api_key: str,
                  hitbtc_secret_key: str,
                  trading_pairs: Optional[List[str]] = None,
-                 trading_required: bool = True
+                 trading_required: bool = True,
+                 domain = "hitbtc.com"
                  ):
         """
         :param hitbtc_api_key: The API key to connect to private HitBTC APIs.
@@ -86,8 +87,8 @@ class HitbtcExchange(ExchangeBase):
         self._trading_required = trading_required
         self._trading_pairs = trading_pairs
         self._hitbtc_auth = HitbtcAuth(hitbtc_api_key, hitbtc_secret_key)
-        self._order_book_tracker = HitbtcOrderBookTracker(trading_pairs=trading_pairs)
-        self._user_stream_tracker = HitbtcUserStreamTracker(self._hitbtc_auth, trading_pairs)
+        self._order_book_tracker = HitbtcOrderBookTracker(trading_pairs=trading_pairs, domain=domain)
+        self._user_stream_tracker = HitbtcUserStreamTracker(self._hitbtc_auth, trading_pairs, domain=domain)
         self._ev_loop = asyncio.get_event_loop()
         self._shared_client = None
         self._poll_notifier = asyncio.Event()
@@ -99,6 +100,7 @@ class HitbtcExchange(ExchangeBase):
         self._user_stream_event_listener_task = None
         self._trading_rules_polling_task = None
         self._last_poll_timestamp = 0
+        self._domain: str = domain
 
     @property
     def name(self) -> str:
@@ -315,16 +317,16 @@ class HitbtcExchange(ExchangeBase):
         signature to the request.
         :returns A response in json format.
         """
-        url = f"{Constants.REST_URL}/{endpoint}"
+        url = f"{Constants.REST_URL.format(self._domain)}/{endpoint}"
         shared_client = await self._http_client()
         # Turn `params` into either GET params or POST body data
-        qs_params: dict = params if method.upper() == "GET" else None
+        qs_params: Optional[dict] = params if method.upper() == "GET" else None
         req_form = aiohttp.FormData(params) if method.upper() == "POST" and params is not None else None
         # Generate auth headers if needed.
         headers: dict = {"Content-Type": "application/x-www-form-urlencoded"}
         if is_auth_required:
-            headers: dict = self._hitbtc_auth.get_headers(method, f"{Constants.REST_URL_AUTH}/{endpoint}",
-                                                          params)
+            headers = self._hitbtc_auth.get_headers(method, f"{Constants.REST_URL_AUTH}/{endpoint}",
+                                                    params)
         # Build request coro
         response_coro = shared_client.request(method=method.upper(), url=url, headers=headers,
                                               params=qs_params, data=req_form,

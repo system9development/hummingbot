@@ -32,13 +32,15 @@ class HitbtcUserStreamTracker(UserStreamTracker):
 
     def __init__(self,
                  hitbtc_auth: Optional[HitbtcAuth] = None,
-                 trading_pairs: Optional[List[str]] = []):
+                 trading_pairs: Optional[List[str]] = [],
+                 domain: str = "hitbtc.com"):
         super().__init__()
         self._hitbtc_auth: HitbtcAuth = hitbtc_auth
         self._trading_pairs: List[str] = trading_pairs
         self._ev_loop: asyncio.events.AbstractEventLoop = asyncio.get_event_loop()
         self._data_source: Optional[UserStreamTrackerDataSource] = None
         self._user_stream_tracking_task: Optional[asyncio.Task] = None
+        self._domain = domain
 
     @property
     def data_source(self) -> UserStreamTrackerDataSource:
@@ -50,7 +52,8 @@ class HitbtcUserStreamTracker(UserStreamTracker):
         if not self._data_source:
             self._data_source = HitbtcAPIUserStreamDataSource(
                 hitbtc_auth=self._hitbtc_auth,
-                trading_pairs=self._trading_pairs
+                trading_pairs=self._trading_pairs,
+                domain=self._domain
             )
         return self._data_source
 

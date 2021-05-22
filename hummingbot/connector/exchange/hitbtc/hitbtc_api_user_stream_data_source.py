@@ -26,13 +26,14 @@ class HitbtcAPIUserStreamDataSource(UserStreamTrackerDataSource):
             cls._logger = logging.getLogger(__name__)
         return cls._logger
 
-    def __init__(self, hitbtc_auth: HitbtcAuth, trading_pairs: Optional[List[str]] = []):
+    def __init__(self, hitbtc_auth: HitbtcAuth, trading_pairs: Optional[List[str]] = [], domain: str = "hitbtc.com"):
         self._hitbtc_auth: HitbtcAuth = hitbtc_auth
-        self._ws: HitbtcWebsocket = None
+        self._ws: Optional[HitbtcWebsocket] = None
         self._trading_pairs = trading_pairs
         self._current_listen_key = None
         self._listen_for_user_stream_task = None
         self._last_recv_time: float = 0
+        self._domain: str = domain
         super().__init__()
 
     @property
@@ -48,7 +49,7 @@ class HitbtcAPIUserStreamDataSource(UserStreamTrackerDataSource):
         """
 
         try:
-            self._ws = HitbtcWebsocket(self._hitbtc_auth)
+            self._ws = HitbtcWebsocket(self._hitbtc_auth, domain=self._domain)
 
             await self._ws.connect()
 

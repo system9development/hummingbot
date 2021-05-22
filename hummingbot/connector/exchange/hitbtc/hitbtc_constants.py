@@ -1,10 +1,10 @@
 # A single source of truth for constant variables related to the exchange
 class Constants:
     EXCHANGE_NAME = "hitbtc"
-    REST_URL = "https://api.hitbtc.com/api/2"
+    REST_URL = "https://api.{}/api/2"
     REST_URL_AUTH = "/api/2"
-    WS_PRIVATE_URL = "wss://api.hitbtc.com/api/2/ws/trading"
-    WS_PUBLIC_URL = "wss://api.hitbtc.com/api/2/ws/public"
+    WS_PRIVATE_URL = "wss://api.{}/api/2/ws/trading"
+    WS_PUBLIC_URL = "wss://api.{}/api/2/ws/public"
 
     HBOT_BROKER_ID = "refzzz48"
 

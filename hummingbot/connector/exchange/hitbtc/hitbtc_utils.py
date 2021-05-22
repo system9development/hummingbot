@@ -134,8 +134,11 @@ async def api_call_with_retries(method,
                                 endpoint,
                                 params: Optional[Dict[str, Any]] = None,
                                 shared_client=None,
-                                try_count: int = 0) -> Dict[str, Any]:
-    url = f"{Constants.REST_URL}/{endpoint}"
+                                try_count: int = 0,
+                                domain: str = "hitbtc.com",
+                                ) -> Dict[str, Any]:
+
+    url = f"{Constants.REST_URL.format(domain)}/{endpoint}"
     headers = {"Content-Type": "application/json"}
     http_client = shared_client if shared_client is not None else aiohttp.ClientSession()
     # Build request coro
@@ -171,4 +174,26 @@ KEYS = {
                   required_if=using_exchange("hitbtc"),
                   is_secure=True,
                   is_connect_key=True),
+}
+
+
+OTHER_DOMAINS = ["changelly_pro"]
+OTHER_DOMAINS_PARAMETER = {"changelly_pro": "pro.changelly.com"}
+OTHER_DOMAINS_EXAMPLE_PAIR = {"changelly_pro": "BTC-USDT"}
+OTHER_DOMAINS_DEFAULT_FEES = {"changelly_pro": [0.2, 0.2]}
+OTHER_DOMAINS_KEYS = {
+    "changelly_pro": {
+        "changelly_pro_api_key":
+            ConfigVar(key="changelly_pro_api_key",
+                      prompt="Enter your Changelly Pro Client ID >>> ",
+                      required_if=using_exchange("changelly_pro"),
+                      is_secure=True,
+                      is_connect_key=True),
+        "changelly_pro_secret_key":
+            ConfigVar(key="changelly_pro_secret_key",
+                      prompt="Enter your Changelly Pro secret key >>> ",
+                      required_if=using_exchange("changelly_pro"),
+                      is_secure=True,
+                      is_connect_key=True),
+    }
 }

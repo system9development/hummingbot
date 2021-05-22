@@ -25,8 +25,8 @@ class HitbtcOrderBookTracker(OrderBookTracker):
             cls._logger = logging.getLogger(__name__)
         return cls._logger
 
-    def __init__(self, trading_pairs: Optional[List[str]] = None,):
-        super().__init__(HitbtcAPIOrderBookDataSource(trading_pairs), trading_pairs)
+    def __init__(self, trading_pairs: Optional[List[str]] = None, domain: str = "hitbtc.com"):
+        super().__init__(HitbtcAPIOrderBookDataSource(trading_pairs, domain = domain), trading_pairs)
 
         self._ev_loop: asyncio.BaseEventLoop = asyncio.get_event_loop()
         self._order_book_snapshot_stream: asyncio.Queue = asyncio.Queue()
