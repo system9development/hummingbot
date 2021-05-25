@@ -39,17 +39,17 @@ class HitbtcAPIOrderBookDataSource(OrderBookTrackerDataSource):
         HitbtcAPIOrderBookDataSource._domain = domain
 
     @classmethod
-    async def get_last_traded_prices(cls, trading_pairs: List[str]) -> Dict[str, Decimal]:
+    async def get_last_traded_prices(cls, trading_pairs: List[str], domain: Optional[str] = "hitbtc.com") -> Dict[str, Decimal]:
         results = {}
         if len(trading_pairs) > 1:
-            tickers: List[Dict[Any]] = await api_call_with_retries("GET", Constants.ENDPOINT["TICKER"], domain=cls._domain)
+            tickers: List[Dict[Any]] = await api_call_with_retries("GET", Constants.ENDPOINT["TICKER"], domain=domain)
         for trading_pair in trading_pairs:
             ex_pair: str = convert_to_exchange_trading_pair(trading_pair)
             if len(trading_pairs) > 1:
                 ticker: Dict[Any] = list([tic for tic in tickers if tic['symbol'] == ex_pair])[0]
             else:
                 url_endpoint = Constants.ENDPOINT["TICKER_SINGLE"].format(trading_pair=ex_pair)
-                ticker: Dict[Any] = await api_call_with_retries("GET", url_endpoint, domain=cls._domain)
+                ticker: Dict[Any] = await api_call_with_retries("GET", url_endpoint, domain=domain)
             results[trading_pair]: Decimal = Decimal(str(ticker["last"]))
         return results
 
