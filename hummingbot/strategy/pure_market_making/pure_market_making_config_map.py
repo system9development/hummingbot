@@ -39,7 +39,11 @@ async def order_amount_prompt() -> str:
     exchange = pure_market_making_config_map["exchange"].value
     trading_pair = pure_market_making_config_map["market"].value
     base_asset, quote_asset = trading_pair.split("-")
-    min_amount = await minimum_order_amount(exchange, trading_pair)
+    min_amount = Decimal(0)
+    try:
+        min_amount = await minimum_order_amount(exchange, trading_pair)
+    except Exception as e:
+        print(f"Failed to get minimum amount: {e}")
     return f"What is the amount of {base_asset} per order? (minimum {min_amount}) >>> "
 
 
@@ -47,7 +51,11 @@ async def validate_order_amount(value: str) -> Optional[str]:
     try:
         exchange = pure_market_making_config_map["exchange"].value
         trading_pair = pure_market_making_config_map["market"].value
-        min_amount = await minimum_order_amount(exchange, trading_pair)
+        min_amount = Decimal(0)
+        try:
+            min_amount = await minimum_order_amount(exchange, trading_pair)
+        except Exception as e:
+            print(f"Failed to get minimum order amount: {e}")
         if Decimal(value) < min_amount:
             return f"Order amount must be at least {min_amount}."
     except Exception:
