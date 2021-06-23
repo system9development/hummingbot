@@ -178,7 +178,7 @@ KEYS = {
 
 
 OTHER_DOMAINS = ["changelly_pro", "bitcoin.com"]
-OTHER_DOMAINS_PARAMETER = {"changelly_pro": "pro.changelly.com", "bitcoin.com": "bitcoin.com"}
+OTHER_DOMAINS_PARAMETER = {"changelly_pro": "pro.changelly.com", "bitcoin.com": "exchange.bitcoin.com"}
 OTHER_DOMAINS_EXAMPLE_PAIR = {"changelly_pro": "BTC-USDT", "bitcoin.com": "BTC-USDT"}
 OTHER_DOMAINS_DEFAULT_FEES = {"changelly_pro": [0.2, 0.2], "bitcoin.com": [0.2, 0.2]}
 OTHER_DOMAINS_KEYS = {
