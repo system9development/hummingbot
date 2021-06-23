@@ -177,10 +177,10 @@ KEYS = {
 }
 
 
-OTHER_DOMAINS = ["changelly_pro"]
-OTHER_DOMAINS_PARAMETER = {"changelly_pro": "pro.changelly.com"}
-OTHER_DOMAINS_EXAMPLE_PAIR = {"changelly_pro": "BTC-USDT"}
-OTHER_DOMAINS_DEFAULT_FEES = {"changelly_pro": [0.2, 0.2]}
+OTHER_DOMAINS = ["changelly_pro", "bitcoin.com"]
+OTHER_DOMAINS_PARAMETER = {"changelly_pro": "pro.changelly.com", "bitcoin.com": "bitcoin.com"}
+OTHER_DOMAINS_EXAMPLE_PAIR = {"changelly_pro": "BTC-USDT", "bitcoin.com": "BTC-USDT"}
+OTHER_DOMAINS_DEFAULT_FEES = {"changelly_pro": [0.2, 0.2], "bitcoin.com": [0.2, 0.2]}
 OTHER_DOMAINS_KEYS = {
     "changelly_pro": {
         "changelly_pro_api_key":
@@ -195,5 +195,19 @@ OTHER_DOMAINS_KEYS = {
                       required_if=using_exchange("changelly_pro"),
                       is_secure=True,
                       is_connect_key=True),
+    },
+    "bitcoin.com": {
+            "bitcoin.com_api_key":
+                ConfigVar(key="bitcoin.com_api_key",
+                          prompt="Enter your Bitcoin.com Client ID >>> ",
+                          required_if=using_exchange("bitcoin.com"),
+                          is_secure=True,
+                          is_connect_key=True),
+            "bitcoin.com_secret_key":
+                ConfigVar(key="bitcoin.com_secret_key",
+                          prompt="Enter your Bitcoin.com secret key >>> ",
+                          required_if=using_exchange("bitcoin.com"),
+                          is_secure=True,
+                          is_connect_key=True),
     }
 }
