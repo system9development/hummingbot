@@ -4,6 +4,7 @@ import asyncio
 from collections import deque, defaultdict
 import logging
 import time
+
 from typing import (
     Deque,
     Dict,
@@ -14,6 +15,7 @@ from typing import (
 from hummingbot.logger import HummingbotLogger
 from hummingbot.core.data_type.order_book_tracker import OrderBookTracker
 from hummingbot.connector.exchange.probit.probit_api_order_book_data_source import ProbitAPIOrderBookDataSource
+from hummingbot.connector.exchange.probit import probit_constants
 
 from hummingbot.core.data_type.order_book import OrderBook
 from hummingbot.core.data_type.order_book_message import OrderBookMessage, OrderBookMessageType
@@ -41,7 +43,7 @@ class ProbitOrderBookTracker(OrderBookTracker):
 
     @property
     def exchange_name(self) -> str:
-        return "probit"
+        return probit_constants.EXCHANGE_NAME
 
     async def _order_book_diff_router(self):
         """

@@ -1,12 +1,11 @@
 import hashlib
 import hmac
-import ujson
-import time
 import base64
 import aiohttp
 import logging
+import asyncio
+from hummingbot.connector.exchange.probit import probit_constants
 
-from hummingbot.connector.exchange.probit.probit_constants import AUTH_URL
 from hummingbot.logger import HummingbotLogger
 from typing import (
     Dict,
@@ -30,48 +29,51 @@ class ProbitAuth():
     def __init__(self, api_key: str, secret_key: str):
         self.api_key = api_key
         self.secret_key = secret_key
-        self.oauth_token = None
-        self.expires_at: float = None
+        self.oauth_token: Optional[str] = None
+        self.expires_in: Optional[float] = None
+
+        self.oauth_token_task = asyncio.ensure_future(self.ensure_oauth_token())
 
     def get_auth_credentials(self):
         return {'api_key': self.api_key, 'api_secret': self.secret_key}
 
-    # NOTE: We can only retrieve oauth_token over REST, but it's used with either REST or WS API
-    async def get_oauth_token(self):
+    async def ensure_oauth_token(self):
+        try:
+            auth_string = f"{self.api_key}:{self.secret_key}"
+            auth_string_bytes = auth_string.encode('ascii')
+            base64_auth_string_bytes = base64.b64encode(auth_string_bytes)
+            base64_message = base64_auth_string_bytes.decode('ascii')
 
-        auth_string = f"{self.api_key}:{self.secret_key}"
-        auth_string_bytes = auth_string.encode('ascii')
-        base64_auth_string_bytes = base64.b64encode(auth_string_bytes)
-        base64_message = base64_auth_string_bytes.decode('ascii')
+            payload = {
+                "grant_type": "client_credentials"
+            }
 
-        payload = {
-            "grant_type": "client_credentials"
-        }
+            headers = {
+                "Accept": "application/json",
+                "Authorization": "Basic " + base64_message,
+                "Content-Type": "application/json"
+            }
 
-        headers = {
-            "Accept": "application/json",
-            "Authorization": "Basic " + base64_message,
-            "Content-Type": "application/json"
-        }
-
-        while True:
-            async with aiohttp.ClientSession(json_serialize = ujson.dumps) as session:
-                try:
-                    async with session.post(AUTH_URL, json = payload, headers = headers) as auth_response:
-                        resp = await auth_response.json()
-                        print(f"Auth response: {resp}")
-
-                        if "access_token" in resp:
-                            self.oauth_token = resp["access_token"]
-                            self.expires_at = time.time() + float(resp["expires_in"])
-                            await session.close()
-                            return
-                        else:
-                            # self._logger().info(f"Some type of error in retrieiving new oauth token: {resp}")
-                            continue
-                except Exception as e:
-                    # self._logger().error(f"Websocket error: {str(e)}", exc_info = True)
-                    print(e)
+            while True:
+                async with aiohttp.ClientSession() as session:
+                    try:
+                        async with session.post(probit_constants.AUTH_URL, json = payload, headers = headers) as auth_response:
+                            resp = await auth_response.json()
+                            if "access_token" in resp:
+                                self.oauth_token = resp["access_token"]
+                                self.expires_in = float(resp["expires_in"]) * 0.75
+                                await session.close()
+                                await asyncio.sleep(self.expires_in)
+                            else:
+                                self.logger().error(f"Failed to retrieve access token (retrying in 5 seconds...){await auth_response.text()}")
+                                await asyncio.sleep(5)
+                    except Exception as e:
+                        self.logger().error(f"Websocket error: {str(e)}", exc_info = True)
+                        # NOTE: Retry timer as in asyncio.sleep() or an actual timer obj?
+                        await asyncio.sleep(5)
+        except Exception as e:
+            self.logger().error(f"Failed to authenticate websocket... {e}", exc_info=True)
+    # This function is used to send the WS auth request before the actual request in probit_websocket
 
     def generate_auth_dict(
         self,
