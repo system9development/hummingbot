@@ -37,6 +37,7 @@ class ProbitAuth():
     def get_auth_credentials(self):
         return {'api_key': self.api_key, 'api_secret': self.secret_key}
 
+    # This function is called once, continually keeps the oauth token updated in case we must re-auth on our WS connection
     async def ensure_oauth_token(self):
         try:
             auth_string = f"{self.api_key}:{self.secret_key}"
@@ -69,11 +70,9 @@ class ProbitAuth():
                                 await asyncio.sleep(5)
                     except Exception as e:
                         self.logger().error(f"Websocket error: {str(e)}", exc_info = True)
-                        # NOTE: Retry timer as in asyncio.sleep() or an actual timer obj?
                         await asyncio.sleep(5)
         except Exception as e:
             self.logger().error(f"Failed to authenticate websocket... {e}", exc_info=True)
-    # This function is used to send the WS auth request before the actual request in probit_websocket
 
     def generate_auth_dict(
         self,

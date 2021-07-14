@@ -34,7 +34,7 @@ class ProbitOrderBookTracker(OrderBookTracker):
                  trading_pairs: Optional[List[str]] = None):
         super().__init__(
             data_source=ProbitAPIOrderBookDataSource(trading_pairs=trading_pairs),
-            trading_pairs=trading_pairs
+            trading_pairs = trading_pairs
         )
         self._order_book_diff_stream: asyncio.Queue = asyncio.Queue()
         self._order_book_snapshot_stream: asyncio.Queue = asyncio.Queue()

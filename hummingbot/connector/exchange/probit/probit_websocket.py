@@ -48,7 +48,6 @@ class ProbitWebsocket():
             return
         await self._client.close()
 
-    # TODO: Verify this function is working
     async def _messages(self) -> AsyncIterable[Any]:
         try:
             while True:
@@ -67,12 +66,12 @@ class ProbitWebsocket():
         finally:
             await self.disconnect()
 
-    # _emit function takes req. payload from request() and sends it to exchange, also sends any needed auth msges prior
-    # _emit also returns local order id for hummingbot
+    # _emit function takes req. payload from request() and sends it to exchange
+    # also sends any needed auth msges prior
     async def _emit(self, payload: Optional[Dict] = None) -> None:
         await self._client.send(ujson.dumps(payload))
 
-    # request function formats the payload and passes it to _emit function
+    # request function formats payload and hands off to _emit function
     async def request(self, type_sub_or_unsub: str, channel: str, params: Optional[Dict] = None) -> int:
         req_payload = {
             "type": type_sub_or_unsub,
@@ -88,6 +87,7 @@ class ProbitWebsocket():
         async for msg in self._messages():
             yield msg
 
+    # Retrieves OAuth token over REST /token API if we need to remain updated
     async def _get_oauth_token(self, timeout: float = 30):
         start_time = time.time()
         while self._auth.oauth_token is None and time.time() - start_time < 30:
@@ -97,6 +97,7 @@ class ProbitWebsocket():
         else:
             return self._auth.oauth_token
 
+    # Sends message with oauth token prior to subscribing on authorized channels
     async def send_ws_authorization(self):
         try:
             # Auth WS Request structure
@@ -115,28 +116,3 @@ class ProbitWebsocket():
                 raise Exception(f"Invalid argument when authenticating websocket (Websocket already authorized?).... {resp}")
         except Exception as e:
             self.logger().error(f"Failed to send authorization message to probit websocket... {e}", exc_info=True)
-
-
-# NOTE: This def is just here for debugging
-async def main():
-
-    logging.basicConfig(filename="test.log", filemode="w+", level=logging.DEBUG)
-
-    # Example of unauthenticated req (only channel not needing auth is "marketdata")
-    # cli_sock = ProbitWebsocket()
-    # await cli_sock.connect()
-    # await cli_sock.request(type_sub_or_unsub = "subscribe", channel = "marketdata", params = {"interval": 500})
-
-    # Example of authenticated req
-    # NOTE: We must pass a ProbitAuth object into the WS constructor for any authenticated req's
-
-    cli_sock = ProbitWebsocket(auth = ProbitAuth(api_key = "7500aca1b63a3c39", secret_key = "2b0a5a036381184e663007365bc5d6f8"))
-    print("Websocket created")
-    await cli_sock.connect()
-    print("Websocket connected")
-    await cli_sock.request(type_sub_or_unsub = "subscribe", channel = "trade_history")
-
-    async for msg in cli_sock._messages():
-        print(msg)
-
-asyncio.run(main())

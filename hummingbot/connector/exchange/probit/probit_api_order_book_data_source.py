@@ -3,6 +3,7 @@ import asyncio
 import logging
 import time
 import pandas as pd
+import math
 from datetime import datetime, timezone
 
 from typing import Optional, List, Dict, Any
@@ -14,8 +15,8 @@ from hummingbot.logger import HummingbotLogger
 
 from hummingbot.connector.exchange.probit.probit_order_book import ProbitOrderBook
 from hummingbot.connector.exchange.probit.probit_api_client import ProbitAPIClient
-
 from hummingbot.connector.exchange.probit import probit_utils
+from hummingbot.connector.exchange.probit.probit_websocket import ProbitWebsocket
 
 
 class ProbitAPIOrderBookDataSource(OrderBookTrackerDataSource):
@@ -94,38 +95,99 @@ class ProbitAPIOrderBookDataSource(OrderBookTrackerDataSource):
 
     async def listen_for_order_book_diffs(self, ev_loop: asyncio.BaseEventLoop, output: asyncio.Queue):
         """
-        Fetches orderbook snapshots
+        Fetches orderbook diffs
         """
+
+        # while True:
+        #     try:
+        #         for trading_pair in self._trading_pairs:
+        #             try:
+        #                 snapshot: Dict[str, any] = await self.get_snapshot(trading_pair)
+        #                 snapshot_timestamp: float = time.time()
+        #                 snapshot_msg: OrderBookMessage = ProbitOrderBook.snapshot_message_from_exchange(
+        #                     snapshot,
+        #                     snapshot_timestamp,
+        #                     metadata={"trading_pair": trading_pair}
+        #                 )
+        #                 output.put_nowait(snapshot_msg)
+        #                 self.logger().debug(f"Saved order book snapshot for {trading_pair}")
+        #                 # Be careful not to go above API rate limits.
+        #                 await asyncio.sleep(self.ORDER_BOOK_DIFF_TIMEOUT)
+        #             except asyncio.CancelledError:
+        #                 raise
+        #             except Exception as e:
+        #                 self.logger().network(
+        #                     "Unexpected error.",
+        #                     exc_info=True,
+        #                     app_warning_msg=f"Unexpected error with REST API request: {e}"
+        #                 )
+        #                 await asyncio.sleep(self.ERROR_TIMEOUT)
+
+        #     except asyncio.CancelledError:
+        #         raise
+        #     except Exception:
+        #         self.logger().error("Unexpected error.", exc_info=True)
+        #         await asyncio.sleep(self.ERROR_TIMEOUT)
+
+        # First WS message has the initial snapshot, all next messages have diffs
+        # So just ignore the snapshot, continue outputting the diffs?
+
+        # Should we use a separate WS for each pair?
+        # Looks like this method only needs to handle one subscription at a time?
+
         while True:
             try:
-                for trading_pair in self._trading_pairs:
-                    try:
-                        snapshot: Dict[str, any] = await self.get_snapshot(trading_pair)
-                        snapshot_timestamp: float = time.time()
-                        snapshot_msg: OrderBookMessage = ProbitOrderBook.snapshot_message_from_exchange(
-                            snapshot,
-                            snapshot_timestamp,
-                            metadata={"trading_pair": trading_pair}
-                        )
-                        output.put_nowait(snapshot_msg)
-                        self.logger().debug(f"Saved order book snapshot for {trading_pair}")
-                        # Be careful not to go above API rate limits.
-                        await asyncio.sleep(self.ORDER_BOOK_DIFF_TIMEOUT)
-                    except asyncio.CancelledError:
-                        raise
-                    except Exception as e:
-                        self.logger().network(
-                            "Unexpected error.",
-                            exc_info=True,
-                            app_warning_msg=f"Unexpected error with REST API request: {e}"
-                        )
-                        await asyncio.sleep(self.ERROR_TIMEOUT)
+                cli_sock = ProbitWebsocket()
+                await cli_sock.connect()
+
+                # If response's "reset"(bool) param == false, it's diff data
+                # Can we use this to get only the diffs?
+                # NOTE: That's what we did ^
+
+                # Check for if resp[status] == "ok"
+                for pair in self._trading_pairs:
+
+                    params = {
+                        "market_id": pair,
+                        "filter": ["order_books"]
+                    }
+
+                    # Subscribing to each trading pair
+                    await cli_sock.request(type_sub_or_unsub = "subscribe", channel = "marketdata", params = params)
+
+                    # NOTE: Using aiohttp, the response fields should be automatically parsed
+                    async for response in cli_sock.on_message():
+
+                        # If "reset" field of response == True it's a snapshot and not a diff, ignore it
+                        if response["reset"] is True:
+                            continue
+                        else:
+                            order_book_diff = response["order_books"]
+
+                            # Setting timestamp as current time - lag on server side
+                            timestamp: int = math.floor(time.time() - order_book_diff["lag"])
+
+                            # Generating OrderBookMessage
+                            orderbook_message: OrderBookMessage = ProbitOrderBook.snapshot_message_from_exchange(
+                                order_book_diff,
+                                timestamp,
+                                metadata = {"trading_pair": response["market_id"]}
+                            )
+
+                            # Outputting OrderBookMessage to queue
+                            output.put_nowait(orderbook_message)
 
             except asyncio.CancelledError:
                 raise
             except Exception:
-                self.logger().error("Unexpected error.", exc_info=True)
+                self.logger().network(
+                    "Error with Probit WebSocket connection...",
+                    exc_info = True,
+                    app_warning_msg = f"Error with Probit connection, retrying in {self.ERROR_TIMEOUT} seconds..."
+                )
                 await asyncio.sleep(self.ERROR_TIMEOUT)
+            finally:
+                await cli_sock.disconnect()
 
     async def listen_for_order_book_snapshots(self, ev_loop: asyncio.BaseEventLoop, output: asyncio.Queue):
         """
@@ -184,6 +246,7 @@ class ProbitAPIOrderBookDataSource(OrderBookTrackerDataSource):
             except asyncio.CancelledError:
                 raise
             except Exception:
+                # NOTE: Error thrown in hummingbot here when trying to cancel order
                 self.logger().error("Unexpected error with REST API request...",
                                     exc_info=True)
                 await asyncio.sleep(self.ERROR_TIMEOUT)
