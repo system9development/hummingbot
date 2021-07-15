@@ -59,6 +59,10 @@ class ProbitOrderBookTracker(OrderBookTracker):
                 ob_message: OrderBookMessage = await self._order_book_diff_stream.get()
                 trading_pair: str = ob_message.trading_pair
 
+                # self.logger().info(
+                #     f"OrderBookMessage object received by _order_book_diff_router function inside probit_order_book_tracker: {ob_message}"
+                # )
+
                 if trading_pair not in self._tracking_message_queues:
                     messages_queued += 1
                     # Save diff messages received before snapshots are ready

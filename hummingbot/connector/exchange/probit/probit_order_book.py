@@ -6,6 +6,7 @@ from typing import (
     Optional,
     Dict,
     List,
+    Any
 )
 from hummingbot.logger import HummingbotLogger
 from hummingbot.core.data_type.order_book import OrderBook
@@ -29,7 +30,7 @@ class ProbitOrderBook(OrderBook):
 
     @classmethod
     def snapshot_message_from_exchange(cls,
-                                       msg: List[Dict[str, any]],
+                                       msg: List[Dict[str, Any]],
                                        timestamp: float,
                                        metadata: Optional[Dict] = None) -> OrderBookMessage:
 
@@ -44,7 +45,7 @@ class ProbitOrderBook(OrderBook):
 
     @classmethod
     def trade_message_from_exchange(cls,
-                                    msg: Dict[str, any],
+                                    msg: Dict[str, Any],
                                     timestamp: float,
                                     metadata: Optional[Dict] = None):
         if metadata:
@@ -57,4 +58,19 @@ class ProbitOrderBook(OrderBook):
             "update_id": timestamp,
             "price": float(msg["price"]),
             "amount": float(msg["quantity"])
+        }, timestamp=timestamp)
+
+    @classmethod
+    def diff_message_from_exchange(cls,
+                                   msg: List[Dict[str, Any]],
+                                   timestamp: float,
+                                   metadata: Optional[Dict] = None) -> OrderBookMessage:
+
+        bids = [[Decimal(i['price']), Decimal(i['quantity'])] for i in msg if i['side'] == 'buy']
+        asks = [[Decimal(i['price']), Decimal(i['quantity'])] for i in msg if i['side'] == 'sell']
+        return OrderBookMessage(OrderBookMessageType.DIFF, {
+            "trading_pair": metadata["trading_pair"],
+            "update_id": timestamp,
+            "bids": bids,
+            "asks": asks
         }, timestamp=timestamp)

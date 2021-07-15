@@ -97,59 +97,17 @@ class ProbitAPIOrderBookDataSource(OrderBookTrackerDataSource):
         """
         Fetches orderbook diffs
         """
-
-        # while True:
-        #     try:
-        #         for trading_pair in self._trading_pairs:
-        #             try:
-        #                 snapshot: Dict[str, any] = await self.get_snapshot(trading_pair)
-        #                 snapshot_timestamp: float = time.time()
-        #                 snapshot_msg: OrderBookMessage = ProbitOrderBook.snapshot_message_from_exchange(
-        #                     snapshot,
-        #                     snapshot_timestamp,
-        #                     metadata={"trading_pair": trading_pair}
-        #                 )
-        #                 output.put_nowait(snapshot_msg)
-        #                 self.logger().debug(f"Saved order book snapshot for {trading_pair}")
-        #                 # Be careful not to go above API rate limits.
-        #                 await asyncio.sleep(self.ORDER_BOOK_DIFF_TIMEOUT)
-        #             except asyncio.CancelledError:
-        #                 raise
-        #             except Exception as e:
-        #                 self.logger().network(
-        #                     "Unexpected error.",
-        #                     exc_info=True,
-        #                     app_warning_msg=f"Unexpected error with REST API request: {e}"
-        #                 )
-        #                 await asyncio.sleep(self.ERROR_TIMEOUT)
-
-        #     except asyncio.CancelledError:
-        #         raise
-        #     except Exception:
-        #         self.logger().error("Unexpected error.", exc_info=True)
-        #         await asyncio.sleep(self.ERROR_TIMEOUT)
-
-        # First WS message has the initial snapshot, all next messages have diffs
-        # So just ignore the snapshot, continue outputting the diffs?
-
-        # Should we use a separate WS for each pair?
-        # Looks like this method only needs to handle one subscription at a time?
-
         while True:
             try:
                 cli_sock = ProbitWebsocket()
                 await cli_sock.connect()
 
-                # If response's "reset"(bool) param == false, it's diff data
-                # Can we use this to get only the diffs?
-                # NOTE: That's what we did ^
-
-                # Check for if resp[status] == "ok"
                 for pair in self._trading_pairs:
 
                     params = {
                         "market_id": pair,
-                        "filter": ["order_books"]
+                        "filter": ["order_books"],
+                        "interval": 100
                     }
 
                     # Subscribing to each trading pair
@@ -158,30 +116,52 @@ class ProbitAPIOrderBookDataSource(OrderBookTrackerDataSource):
                     # NOTE: Using aiohttp, the response fields should be automatically parsed
                     async for response in cli_sock.on_message():
 
-                        # If "reset" field of response == True it's a snapshot and not a diff, ignore it
-                        if response["reset"] is True:
+                        # If response has a "reset" field, this is a snapshot message, ignore it
+                        if "reset" in response:
                             continue
                         else:
-                            order_book_diff = response["order_books"]
+                            try:
+                                order_book_diff: List[Dict] = response["order_books"]
+                                server_lag: float = float(response["lag"])
+                                # Setting timestamp as current time - lag on server side
+                                timestamp: int = math.floor(time.time() - server_lag)
 
-                            # Setting timestamp as current time - lag on server side
-                            timestamp: int = math.floor(time.time() - order_book_diff["lag"])
+                                self.logger().info(
+                                    f"Parsed WS response inside api_order_book_data_source: {response}"
+                                )
 
+                            # NOTE: Remove these, shouldn't be an issue anymore
+                            except KeyError as ke:
+                                self.logger().debug(
+                                    f"Keyerror on WS marketdata channel caused by this message: {response}",
+                                    exc_info = True
+                                )
+                            except TypeError as te:
+                                self.logger().debug(
+                                    f"TypeError on WS marketdata channel caused by this order_book_diff: {order_book_diff}",
+                                    exc_info = True
+                                )
+
+                            # NOTE: ^Added method into ProbitOrderBook that does exact same thing as snapshot_message_from_exchange but type is .DIFF instead of .SNAPSHOT, the issue was probit_order_book was sending the diffs to probit_order_book_tracker as type SNAPSHOT and resetting the entire OrderBook to the diff msges
                             # Generating OrderBookMessage
-                            orderbook_message: OrderBookMessage = ProbitOrderBook.snapshot_message_from_exchange(
+                            orderbook_message: OrderBookMessage = ProbitOrderBook.diff_message_from_exchange(
                                 order_book_diff,
                                 timestamp,
                                 metadata = {"trading_pair": response["market_id"]}
                             )
+
+                            # self.logger().info(
+                            #     f"Created OrderBookMessage object inside api_order_book_data_source: {orderbook_message}"
+                            # )
 
                             # Outputting OrderBookMessage to queue
                             output.put_nowait(orderbook_message)
 
             except asyncio.CancelledError:
                 raise
-            except Exception:
+            except Exception as e:
                 self.logger().network(
-                    "Error with Probit WebSocket connection...",
+                    f"Error with Probit WebSocket connection...{e}",
                     exc_info = True,
                     app_warning_msg = f"Error with Probit connection, retrying in {self.ERROR_TIMEOUT} seconds..."
                 )
@@ -197,7 +177,8 @@ class ProbitAPIOrderBookDataSource(OrderBookTrackerDataSource):
             try:
                 for trading_pair in self._trading_pairs:
                     try:
-                        snapshot: Dict[str, any] = await self.get_snapshot(trading_pair)
+                        # NOTE: Should snapshot be Dict[str, any] or Dict[str,Any]?
+                        snapshot: List[Dict[str, Any]] = await self.get_snapshot(trading_pair)
                         snapshot_timestamp: float = time.time()
                         snapshot_msg: OrderBookMessage = ProbitOrderBook.snapshot_message_from_exchange(
                             snapshot,
@@ -210,10 +191,10 @@ class ProbitAPIOrderBookDataSource(OrderBookTrackerDataSource):
                         await asyncio.sleep(self.ORDER_BOOK_SNAPSHOT_TIMEOUT)
                     except asyncio.CancelledError:
                         raise
-                    except Exception:
+                    except Exception as e:
                         self.logger().network(
-                            "Unexpected error with REST API request...",
-                            exc_info=True
+                            f"Unexpected error with REST API request...{e}",
+                            exc_info = True
                         )
                         await asyncio.sleep(self.ERROR_TIMEOUT)
                 this_hour: pd.Timestamp = pd.Timestamp.utcnow().replace(minute=0, second=0, microsecond=0)
@@ -231,7 +212,7 @@ class ProbitAPIOrderBookDataSource(OrderBookTrackerDataSource):
         while True:
             try:
                 for trading_pair in self._trading_pairs:
-                    trades: List[Dict[str, any]] = await self.get_recent_trades(trading_pair)
+                    trades: List[Dict[str, Any]] = await self.get_recent_trades(trading_pair)
                     for trade in trades[::-1]:
                         trade: Dict[Any] = trade
                         trade_timestamp: float = time.mktime(datetime.strptime(trade['time'], '%Y-%m-%dT%H:%M:%S.%fZ').replace(tzinfo=timezone.utc).timetuple())
