@@ -2,7 +2,6 @@
 import asyncio
 import logging
 import time
-import pandas as pd
 import math
 from datetime import datetime, timezone
 
@@ -113,46 +112,57 @@ class ProbitAPIOrderBookDataSource(OrderBookTrackerDataSource):
                     # Subscribing to each trading pair
                     await cli_sock.request(type_sub_or_unsub = "subscribe", channel = "marketdata", params = params)
 
-                    # NOTE: Using aiohttp, the response fields should be automatically parsed
                     async for response in cli_sock.on_message():
 
-                        # If response has a "reset" field, this is a snapshot message, ignore it
+                        # Probit API for WS doesn't have exclusive snapshot channel, so we parse all diffs and snapshots accordingly on the same channel
+                        # If response has a "reset" field == True, this is a snapshot message, we output it to the queue as a SNAPSHOT msg
                         if "reset" in response:
-                            continue
-                        else:
+                            if response["reset"] is True:
+                                try:
+                                    snapshot_server_lag = float(response["lag"])
+                                    order_book_snapshot: List[Dict[str, Any]] = response["order_books"]
+                                    snapshot_timestamp: float = time.time() - snapshot_server_lag
+                                    trading_pair: str = response["market_id"]
+
+                                    snapshot_msg: OrderBookMessage = ProbitOrderBook.snapshot_message_from_exchange(
+                                        order_book_snapshot,
+                                        snapshot_timestamp,
+                                        metadata = {"trading_pair": trading_pair}
+                                    )
+
+                                    # Outputting snapshot OrderBookMessage to queue
+                                    output.put_nowait(snapshot_msg)
+
+                                except asyncio.CancelledError:
+                                    raise
+                                except Exception as e:
+                                    self.logger().network(
+                                        f"Unexpected error handling snapshot message...{e}",
+                                        exc_info = True
+                                    )
+                                    await asyncio.sleep(self.ERROR_TIMEOUT)
+
+                        # If "reset" is not in response, this is a DIFF message
+                        if "reset" not in response:
                             try:
                                 order_book_diff: List[Dict] = response["order_books"]
-                                server_lag: float = float(response["lag"])
+                                diff_server_lag: float = float(response["lag"])
                                 # Setting timestamp as current time - lag on server side
-                                timestamp: int = math.floor(time.time() - server_lag)
+                                diff_timestamp: int = math.floor(time.time() - diff_server_lag)
 
-                                self.logger().info(
-                                    f"Parsed WS response inside api_order_book_data_source: {response}"
+                            except Exception as e:
+                                self.logger().network(
+                                    f"Error handling Probit websocket connection...{e}",
+                                    exc_info = True,
+                                    app_warning_msg = f"Error parsing DIFF msg from Probit websocket connection...{e}"
                                 )
 
-                            # NOTE: Remove these, shouldn't be an issue anymore
-                            except KeyError as ke:
-                                self.logger().debug(
-                                    f"Keyerror on WS marketdata channel caused by this message: {response}",
-                                    exc_info = True
-                                )
-                            except TypeError as te:
-                                self.logger().debug(
-                                    f"TypeError on WS marketdata channel caused by this order_book_diff: {order_book_diff}",
-                                    exc_info = True
-                                )
-
-                            # NOTE: ^Added method into ProbitOrderBook that does exact same thing as snapshot_message_from_exchange but type is .DIFF instead of .SNAPSHOT, the issue was probit_order_book was sending the diffs to probit_order_book_tracker as type SNAPSHOT and resetting the entire OrderBook to the diff msges
                             # Generating OrderBookMessage
                             orderbook_message: OrderBookMessage = ProbitOrderBook.diff_message_from_exchange(
                                 order_book_diff,
-                                timestamp,
+                                diff_timestamp,
                                 metadata = {"trading_pair": response["market_id"]}
                             )
-
-                            # self.logger().info(
-                            #     f"Created OrderBookMessage object inside api_order_book_data_source: {orderbook_message}"
-                            # )
 
                             # Outputting OrderBookMessage to queue
                             output.put_nowait(orderbook_message)
@@ -177,8 +187,8 @@ class ProbitAPIOrderBookDataSource(OrderBookTrackerDataSource):
             try:
                 for trading_pair in self._trading_pairs:
                     try:
-                        # NOTE: Should snapshot be Dict[str, any] or Dict[str,Any]?
-                        snapshot: List[Dict[str, Any]] = await self.get_snapshot(trading_pair)
+                        # Calling the snapshot method that uses REST
+                        snapshot: Dict[str, Any] = await self.get_snapshot(trading_pair)
                         snapshot_timestamp: float = time.time()
                         snapshot_msg: OrderBookMessage = ProbitOrderBook.snapshot_message_from_exchange(
                             snapshot,
@@ -197,10 +207,7 @@ class ProbitAPIOrderBookDataSource(OrderBookTrackerDataSource):
                             exc_info = True
                         )
                         await asyncio.sleep(self.ERROR_TIMEOUT)
-                this_hour: pd.Timestamp = pd.Timestamp.utcnow().replace(minute=0, second=0, microsecond=0)
-                next_hour: pd.Timestamp = this_hour + pd.Timedelta(hours=1)
-                delta: float = next_hour.timestamp() - time.time()
-                await asyncio.sleep(delta)
+
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -214,7 +221,7 @@ class ProbitAPIOrderBookDataSource(OrderBookTrackerDataSource):
                 for trading_pair in self._trading_pairs:
                     trades: List[Dict[str, Any]] = await self.get_recent_trades(trading_pair)
                     for trade in trades[::-1]:
-                        trade: Dict[Any] = trade
+                        trade: Dict[str, Any] = trade
                         trade_timestamp: float = time.mktime(datetime.strptime(trade['time'], '%Y-%m-%dT%H:%M:%S.%fZ').replace(tzinfo=timezone.utc).timetuple())
                         trade_msg: OrderBookMessage = ProbitOrderBook.trade_message_from_exchange(
                             trade,
@@ -226,8 +233,8 @@ class ProbitAPIOrderBookDataSource(OrderBookTrackerDataSource):
                 await asyncio.sleep(self.TRADE_TIMEOUT)
             except asyncio.CancelledError:
                 raise
-            except Exception:
+            except Exception as e:
                 # NOTE: Error thrown in hummingbot here when trying to cancel order
-                self.logger().error("Unexpected error with REST API request...",
+                self.logger().error(f"Unexpected error with REST API request...{e}",
                                     exc_info=True)
                 await asyncio.sleep(self.ERROR_TIMEOUT)

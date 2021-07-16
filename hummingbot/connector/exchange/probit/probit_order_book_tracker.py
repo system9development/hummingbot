@@ -36,7 +36,7 @@ class ProbitOrderBookTracker(OrderBookTracker):
             data_source=ProbitAPIOrderBookDataSource(trading_pairs=trading_pairs),
             trading_pairs = trading_pairs
         )
-        self._order_book_diff_stream: asyncio.Queue = asyncio.Queue()
+        # self._order_book_diff_stream: asyncio.Queue = asyncio.Queue()
         self._order_book_snapshot_stream: asyncio.Queue = asyncio.Queue()
         self._ev_loop: asyncio.BaseEventLoop = asyncio.get_event_loop()
         self._saved_message_queues: Dict[str, Deque[OrderBookMessage]] = defaultdict(lambda: deque(maxlen=1000))
@@ -44,60 +44,6 @@ class ProbitOrderBookTracker(OrderBookTracker):
     @property
     def exchange_name(self) -> str:
         return probit_constants.EXCHANGE_NAME
-
-    async def _order_book_diff_router(self):
-        """
-        Route the real-time order book diff messages to the correct order book.
-        """
-        last_message_timestamp: float = time.time()
-        messages_queued: int = 0
-        messages_accepted: int = 0
-        messages_rejected: int = 0
-
-        while True:
-            try:
-                ob_message: OrderBookMessage = await self._order_book_diff_stream.get()
-                trading_pair: str = ob_message.trading_pair
-
-                # self.logger().info(
-                #     f"OrderBookMessage object received by _order_book_diff_router function inside probit_order_book_tracker: {ob_message}"
-                # )
-
-                if trading_pair not in self._tracking_message_queues:
-                    messages_queued += 1
-                    # Save diff messages received before snapshots are ready
-                    self._saved_message_queues[trading_pair].append(ob_message)
-                    continue
-                message_queue: asyncio.Queue = self._tracking_message_queues[trading_pair]
-                # Check the order book's initial update ID. If it's larger, don't bother.
-                order_book: OrderBook = self._order_books[trading_pair]
-                if order_book.snapshot_uid > ob_message.update_id:
-                    messages_rejected += 1
-                    continue
-                await message_queue.put(ob_message)
-                messages_accepted += 1
-
-                # Log some statistics.
-                now: float = time.time()
-                if int(now / 60.0) > int(last_message_timestamp / 60.0):
-                    self.logger().debug("Diff messages processed: %d, rejected: %d, queued: %d",
-                                        messages_accepted,
-                                        messages_rejected,
-                                        messages_queued)
-                    messages_accepted = 0
-                    messages_rejected = 0
-                    messages_queued = 0
-
-                last_message_timestamp = now
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                self.logger().network(
-                    "Unexpected error routing order book messages.",
-                    exc_info=True,
-                    app_warning_msg="Unexpected error routing order book messages. Retrying after 5 seconds."
-                )
-                await asyncio.sleep(5.0)
 
     async def _track_single_book(self, trading_pair: str):
         past_diffs_window: Deque[OrderBookMessage] = deque()
@@ -129,14 +75,13 @@ class ProbitOrderBookTracker(OrderBookTracker):
                     # Output some statistics periodically.
                     now: float = time.time()
                     if int(now / 60.0) > int(last_message_timestamp / 60.0):
-                        self.logger().debug("Processed %d order book diffs for %s.",
-                                            diff_messages_accepted, trading_pair)
+                        self.logger().info("Processed %d order book diffs inside _track_single_book inside probit_order_book_tracker for %s.",
+                                           diff_messages_accepted, trading_pair)
                         diff_messages_accepted = 0
                     last_message_timestamp = now
                 elif message.type is OrderBookMessageType.SNAPSHOT:
                     past_diffs: List[OrderBookMessage] = list(past_diffs_window)
                     order_book.restore_from_snapshot_and_diffs(message, past_diffs)
-                    self.logger().debug("Processed order book snapshot for %s.", trading_pair)
             except asyncio.CancelledError:
                 raise
             except Exception:
