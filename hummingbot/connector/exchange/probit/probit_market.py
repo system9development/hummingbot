@@ -555,6 +555,7 @@ class ProbitMarket(ExchangeBase):
                                                       "Check API key and network connection.")
                 await asyncio.sleep(0.5)
 
+    # NOTE: This function should be in Task 2 class, ideally using WS instead of REST
     async def _update_balances(self):
         """
         Calls REST API to update total and available balances.
@@ -579,6 +580,7 @@ class ProbitMarket(ExchangeBase):
         self._in_flight_orders_snapshot = {k: copy.copy(v) for k, v in self._in_flight_orders.items()}
         self._in_flight_orders_snapshot_timestamp = self._current_timestamp
 
+    # NOTE: This function should also be in task 2 class, ideally using WS instead of REST
     async def _update_order_status(self):
         """
         Calls REST API to get status update for each in-flight order.

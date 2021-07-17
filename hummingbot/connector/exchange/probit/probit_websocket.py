@@ -79,7 +79,6 @@ class ProbitWebsocket():
         }
         if params:
             req_payload.update(params)
-        self.logger().debug(f"Initial payload:{req_payload}")
         return await self._emit(payload = req_payload)
 
     # Listens for messages by method
